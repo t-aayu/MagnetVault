@@ -1,0 +1,27 @@
+<resources>
+    <string name="app_name">MagnetVault</string>
+    <string name="app_tagline">Multi-Indexer Torrent Search &amp; Magnet Utility</string>
+    <string name="nav_search">Search</string>
+    <string name="nav_vault">Vault</string>
+    <string name="nav_settings">Settings</string>
+    <string name="sign_in_google">Sign in with Google</string>
+    <string name="continue_without_sign_in">Continue without Sign-In</string>
+    <string name="sign_out">Sign out</string>
+    <string name="search_placeholder">Search 1337x, EZTV, YTS, TPB, Nyaa…</string>
+    <string name="trending_title">Trending Across Indexers</string>
+    <string name="recent_searches">Recent Searches</string>
+    <string name="action_copy_magnet">Copy Magnet</string>
+    <string name="action_open_seedr">Open Seedr.cc</string>
+    <string name="action_open_torbox">Open TorBox</string>
+    <string name="action_open_local">Local Client</string>
+    <string name="action_share">Share</string>
+    <string name="action_bookmark">Bookmark</string>
+    <string name="action_bookmarked">Saved</string>
+    <string name="action_test_mirrors">Ping All Mirrors</string>
+    <string name="action_add_mirror">Add Mirror URL</string>
+    <string name="action_reset_defaults">Reset Defaults</string>
+    <string name="empty_bookmarks_title">Your Vault is Empty</string>
+    <string name="empty_bookmarks_subtitle">Bookmark any torrent from search results to keep it handy here.</string>
+    <string name="empty_history_title">No Search History</string>
+    <string name="empty_history_subtitle">Your recent searches will appear here automatically.</string>
+</resources>

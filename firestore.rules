@@ -1,0 +1,170 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net: Default Deny All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- GLOBAL HARDENED PRIMITIVES ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidTimestamp(ts) {
+      return ts is timestamp && ts <= request.time;
+    }
+
+    function isValidSource(src) {
+      return src is string && src.size() >= 2 && src.size() <= 32 &&
+             src in ['X1337', 'EZTV', 'YTS', 'TPB', 'NYAA', 'LIMETORRENTS'];
+    }
+
+    function isValidCategory(cat) {
+      return cat is string && cat.size() >= 2 && cat.size() <= 32 &&
+             cat in ['ALL', 'MOVIES', 'TV', 'ANIME', 'GAMES', 'APPS', 'MUSIC', 'OTHER'];
+    }
+
+    // --- ENTITY VALIDATION BLUEPRINTS ---
+    function isValidBookmark(data, userId) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId == userId &&
+             data.title is string && data.title.size() >= 1 && data.title.size() <= 500 &&
+             isValidSource(data.source) &&
+             isValidCategory(data.category) &&
+             data.sizeLabel is string && data.sizeLabel.size() <= 64 &&
+             data.sizeBytes is int && data.sizeBytes >= 0 &&
+             data.seeders is int && data.seeders >= 0 &&
+             data.leechers is int && data.leechers >= 0 &&
+             data.uploadDateLabel is string && data.uploadDateLabel.size() <= 64 &&
+             data.magnetUri is string && data.magnetUri.size() <= 4000 &&
+             data.infoHash is string && data.infoHash.size() <= 128 &&
+             data.detailPageUrl is string && data.detailPageUrl.size() <= 1000 &&
+             data.qualityTags is list && data.qualityTags.size() <= 10 &&
+             (data.qualityTags.size() == 0 || data.qualityTags[0] is string) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidSearchHistory(data, userId) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId == userId &&
+             data.query is string && data.query.size() >= 1 && data.query.size() <= 200 &&
+             isValidCategory(data.category) &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    function isValidMirrorConfig(data, userId) {
+      return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId == userId &&
+             isValidSource(data.provider) &&
+             data.enabled is bool &&
+             data.mirrors is list && data.mirrors.size() >= 1 && data.mirrors.size() <= 12 &&
+             data.mirrors[0] is string &&
+             data.activeMirrorUrl is string && data.activeMirrorUrl.size() >= 8 && data.activeMirrorUrl.size() <= 500 &&
+             isValidTimestamp(data.createdAt) &&
+             isValidTimestamp(data.updatedAt);
+    }
+
+    // --- COLLECTION RULES ---
+    match /users/{userId} {
+      // User-scoped Bookmarks
+      match /bookmarks/{bookmarkId} {
+        allow get: if isOwner(userId) && isValidId(bookmarkId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(bookmarkId) &&
+                         incoming().keys().hasAll([
+                           'userId', 'title', 'source', 'category', 'sizeLabel',
+                           'sizeBytes', 'seeders', 'leechers', 'uploadDateLabel',
+                           'magnetUri', 'infoHash', 'detailPageUrl', 'qualityTags',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'title', 'source', 'category', 'sizeLabel',
+                           'sizeBytes', 'seeders', 'leechers', 'uploadDateLabel',
+                           'magnetUri', 'infoHash', 'detailPageUrl', 'qualityTags',
+                           'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidBookmark(incoming(), userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(bookmarkId) &&
+                         isValidBookmark(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'magnetUri', 'seeders', 'leechers', 'sizeLabel', 'sizeBytes', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(bookmarkId);
+      }
+
+      // User-scoped Search History
+      match /search_history/{entryId} {
+        allow get: if isOwner(userId) && isValidId(entryId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(entryId) &&
+                         incoming().keys().hasAll(['userId', 'query', 'category', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly(['userId', 'query', 'category', 'createdAt', 'updatedAt']) &&
+                         isValidSearchHistory(incoming(), userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(entryId) &&
+                         isValidSearchHistory(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly(['category', 'updatedAt']);
+
+        allow delete: if isOwner(userId) && isValidId(entryId);
+      }
+
+      // User-scoped Mirror Configurations
+      match /mirror_configs/{providerId} {
+        allow get: if isOwner(userId) && isValidId(providerId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId) &&
+                         isValidId(providerId) &&
+                         providerId == incoming().provider &&
+                         incoming().keys().hasAll([
+                           'userId', 'provider', 'enabled', 'mirrors', 'activeMirrorUrl', 'createdAt', 'updatedAt'
+                         ]) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'provider', 'enabled', 'mirrors', 'activeMirrorUrl', 'createdAt', 'updatedAt'
+                         ]) &&
+                         isValidMirrorConfig(incoming(), userId);
+
+        allow update: if isOwner(userId) &&
+                         isValidId(providerId) &&
+                         isValidMirrorConfig(incoming(), userId) &&
+                         incoming().userId == existing().userId &&
+                         incoming().provider == existing().provider &&
+                         incoming().createdAt == existing().createdAt &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'enabled', 'mirrors', 'activeMirrorUrl', 'updatedAt'
+                         ]);
+
+        allow delete: if isOwner(userId) && isValidId(providerId);
+      }
+    }
+  }
+}

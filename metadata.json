@@ -1,0 +1,6 @@
+{
+  "name": "MagnetVault",
+  "description": "Multi-indexer torrent search for 1337x, EZTV, YTS, ThePirateBay, Nyaa, and LimeTorrents with one-tap magnet copy, Seedr.cc & TorBox browser shortcuts, live mirror health checker, local mode, and optional Google Sign-In cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

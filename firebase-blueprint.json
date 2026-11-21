@@ -1,0 +1,184 @@
+{
+  "entities": {
+    "BookmarkRecord": {
+      "title": "BookmarkRecord",
+      "description": "A user-saved torrent result with magnet link and metadata synced across devices.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID"
+        },
+        "title": {
+          "type": "string",
+          "description": "Torrent release title"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["X1337", "EZTV", "YTS", "TPB", "NYAA", "LIMETORRENTS"],
+          "description": "Origin torrent indexer identifier"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["ALL", "MOVIES", "TV", "ANIME", "GAMES", "APPS", "MUSIC", "OTHER"],
+          "description": "Normalized torrent category"
+        },
+        "sizeLabel": {
+          "type": "string",
+          "description": "Human-readable torrent size"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "description": "Torrent size in bytes"
+        },
+        "seeders": {
+          "type": "integer",
+          "description": "Seeder count at save time"
+        },
+        "leechers": {
+          "type": "integer",
+          "description": "Leecher count at save time"
+        },
+        "uploadDateLabel": {
+          "type": "string",
+          "description": "Upload date label"
+        },
+        "magnetUri": {
+          "type": "string",
+          "description": "Magnet URI if resolved"
+        },
+        "infoHash": {
+          "type": "string",
+          "description": "Torrent info hash"
+        },
+        "detailPageUrl": {
+          "type": "string",
+          "description": "Indexer detail page URL"
+        },
+        "qualityTags": {
+          "type": "array",
+          "description": "Parsed video/release quality tags"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written via FieldValue.serverTimestamp()"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written via FieldValue.serverTimestamp()"
+        }
+      },
+      "required": [
+        "userId",
+        "title",
+        "source",
+        "category",
+        "sizeLabel",
+        "sizeBytes",
+        "seeders",
+        "leechers",
+        "uploadDateLabel",
+        "magnetUri",
+        "infoHash",
+        "detailPageUrl",
+        "qualityTags",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SearchHistoryRecord": {
+      "title": "SearchHistoryRecord",
+      "description": "A user search query stored for quick re-search across devices.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID"
+        },
+        "query": {
+          "type": "string",
+          "description": "Search query text"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["ALL", "MOVIES", "TV", "ANIME", "GAMES", "APPS", "MUSIC", "OTHER"],
+          "description": "Selected category when searched"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written via FieldValue.serverTimestamp()"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written via FieldValue.serverTimestamp()"
+        }
+      },
+      "required": ["userId", "query", "category", "createdAt", "updatedAt"]
+    },
+    "MirrorConfigRecord": {
+      "title": "MirrorConfigRecord",
+      "description": "User-customized mirror URLs and enabled state per torrent indexer.",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Owner Firebase Auth UID"
+        },
+        "provider": {
+          "type": "string",
+          "enum": ["X1337", "EZTV", "YTS", "TPB", "NYAA", "LIMETORRENTS"],
+          "description": "Torrent indexer provider key"
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether this indexer is active during searches"
+        },
+        "mirrors": {
+          "type": "array",
+          "description": "Ordered list of HTTPS mirror base URLs"
+        },
+        "activeMirrorUrl": {
+          "type": "string",
+          "description": "Preferred primary mirror URL"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written via FieldValue.serverTimestamp()"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp written via FieldValue.serverTimestamp()"
+        }
+      },
+      "required": [
+        "userId",
+        "provider",
+        "enabled",
+        "mirrors",
+        "activeMirrorUrl",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/bookmarks/{bookmarkId}": {
+      "schema": { "$ref": "#/entities/BookmarkRecord" },
+      "description": "Per-user cloud-synced torrent bookmarks."
+    },
+    "/users/{userId}/search_history/{entryId}": {
+      "schema": { "$ref": "#/entities/SearchHistoryRecord" },
+      "description": "Per-user cloud-synced recent search history."
+    },
+    "/users/{userId}/mirror_configs/{providerId}": {
+      "schema": { "$ref": "#/entities/MirrorConfigRecord" },
+      "description": "Per-user cloud-synced custom mirror URLs and indexer toggles."
+    }
+  }
+}
