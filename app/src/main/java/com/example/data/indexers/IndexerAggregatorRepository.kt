@@ -54,11 +54,13 @@ class IndexerAggregatorRepository {
         val deferreds = enabledConfigs.map { config ->
             async(Dispatchers.IO) {
                 val orderedMirrors = buildOrderedMirrors(config)
+                val webUrl = buildWebSearchUrl(config.provider, orderedMirrors, query)
                 onProviderProgress(
                     IndexerSearchStatus(
                         source = config.provider,
                         mirrorUsed = orderedMirrors.firstOrNull().orEmpty(),
-                        isLoading = true
+                        isLoading = true,
+                        webSearchUrl = webUrl
                     )
                 )
                 val outcome = searchSingleProviderWithFailover(
@@ -300,14 +302,16 @@ class IndexerAggregatorRepository {
         val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
         val pathEncoded = encoded.replace("+", "%20")
 
+        val webUrl = buildWebSearchUrl(source, mirrors, cleanQuery)
+
         if (source == IndexerSource.YTS && category != TorrentCategory.ALL && category != TorrentCategory.MOVIES) {
-            return emptyList<TorrentResult>() to IndexerSearchStatus(source, mirrors.firstOrNull().orEmpty(), false, 0, null)
+            return emptyList<TorrentResult>() to IndexerSearchStatus(source, mirrors.firstOrNull().orEmpty(), false, 0, null, webUrl)
         }
         if (source == IndexerSource.EZTV && category != TorrentCategory.ALL && category != TorrentCategory.TV) {
-            return emptyList<TorrentResult>() to IndexerSearchStatus(source, mirrors.firstOrNull().orEmpty(), false, 0, null)
+            return emptyList<TorrentResult>() to IndexerSearchStatus(source, mirrors.firstOrNull().orEmpty(), false, 0, null, webUrl)
         }
         if (source == IndexerSource.NYAA && category != TorrentCategory.ALL && category != TorrentCategory.ANIME && category != TorrentCategory.MUSIC && category != TorrentCategory.APPS) {
-            return emptyList<TorrentResult>() to IndexerSearchStatus(source, mirrors.firstOrNull().orEmpty(), false, 0, null)
+            return emptyList<TorrentResult>() to IndexerSearchStatus(source, mirrors.firstOrNull().orEmpty(), false, 0, null, webUrl)
         }
 
         val eztvImdbLookup = if (source == IndexerSource.EZTV) {
@@ -374,9 +378,55 @@ class IndexerAggregatorRepository {
             mirrorUsed = usedMirror,
             isLoading = false,
             resultCount = items.size,
-            errorMessage = if (items.isEmpty()) lastError else null
+            errorMessage = if (items.isEmpty()) lastError else null,
+            webSearchUrl = webUrl
         )
         return items to status
+    }
+
+    /**
+     * Builds the human-browsable HTML search page URL for an indexer so users can open it
+     * directly inside the in-app HTML view or their default browser if API/scraping fails.
+     */
+    fun buildWebSearchUrl(
+        source: IndexerSource,
+        mirrors: List<String>,
+        query: String
+    ): String {
+        val cleanQuery = query.trim()
+        val encoded = URLEncoder.encode(cleanQuery, "UTF-8")
+        val pathEncoded = encoded.replace("+", "%20")
+        val directMirror = mirrors
+            .map { it.trim().trimEnd('/') }
+            .firstOrNull { !isKnabenEndpoint(it) && !it.contains("apibay.org", ignoreCase = true) }
+
+        return when (source) {
+            IndexerSource.X1337 -> {
+                val host = directMirror ?: "https://1337x.to"
+                if (cleanQuery.isBlank()) host else "$host/search/$pathEncoded/1/"
+            }
+            IndexerSource.EZTV -> {
+                val host = directMirror ?: "https://eztvx.to"
+                val slug = cleanQuery.lowercase(Locale.US).replace(Regex("[^a-z0-9]+"), "-").trim('-')
+                if (slug.isBlank()) host else "$host/search/$slug"
+            }
+            IndexerSource.YTS -> {
+                val host = directMirror ?: "https://yts.mx"
+                if (cleanQuery.isBlank()) host else "$host/browse-movies/$pathEncoded/all/all/0/latest/0/all"
+            }
+            IndexerSource.TPB -> {
+                val host = directMirror ?: "https://thepiratebay.org"
+                if (cleanQuery.isBlank()) host else "$host/search.php?q=$encoded"
+            }
+            IndexerSource.NYAA -> {
+                val host = directMirror ?: "https://nyaa.si"
+                if (cleanQuery.isBlank()) host else "$host/?f=0&c=0_0&q=$encoded"
+            }
+            IndexerSource.LIMETORRENTS -> {
+                val host = directMirror ?: "https://www.limetorrents.lol"
+                if (cleanQuery.isBlank()) host else "$host/search/all/$pathEncoded/"
+            }
+        }
     }
 
     /**

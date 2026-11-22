@@ -13,9 +13,11 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Bookmarks
+import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +36,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -53,7 +56,13 @@ import com.example.data.auth.GoogleAuthManager
 import com.example.data.firebase.CloudSyncRepository
 import com.example.data.indexers.IndexerAggregatorRepository
 import com.example.data.local.LocalPrefsStore
+import com.example.data.network.CustomAppDns
+import com.example.model.CustomDnsConfig
+import com.example.model.CustomDnsPreset
+import com.example.model.WebsiteOpenMode
 import com.example.ui.auth.AuthScreen
+import com.example.ui.browser.InAppBrowserScreen
+import com.example.ui.browser.validateAndNormalizeWebUrl
 import com.example.ui.search.SearchScreen
 import com.example.ui.settings.SettingsScreen
 import com.example.ui.theme.MagnetVaultTheme
@@ -75,6 +84,7 @@ enum class AppDestination(
     val testTag: String
 ) {
     SEARCH(R.string.nav_search, Icons.Filled.Search, Icons.Outlined.Search, "nav_search"),
+    SITES(R.string.nav_sites, Icons.Filled.Language, Icons.Outlined.Language, "nav_sites"),
     VAULT(R.string.nav_vault, Icons.Filled.Bookmarks, Icons.Outlined.Bookmarks, "nav_vault"),
     SETTINGS(R.string.nav_settings, Icons.Filled.Settings, Icons.Outlined.Settings, "nav_settings")
 }
@@ -86,6 +96,13 @@ fun MagnetVaultApp() {
     val prefsStore = remember(context) { LocalPrefsStore(context.applicationContext) }
     val isDarkTheme by prefsStore.darkThemeFlow.collectAsStateWithLifecycle(initialValue = true)
     val guestModeEnabled by prefsStore.guestModeEnabledFlow.collectAsStateWithLifecycle(initialValue = null)
+    val customDnsConfig by prefsStore.customDnsConfigFlow.collectAsStateWithLifecycle(
+        initialValue = CustomDnsConfig(preset = CustomDnsPreset.ADGUARD)
+    )
+
+    LaunchedEffect(customDnsConfig) {
+        CustomAppDns.configure(customDnsConfig)
+    }
 
     var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
 
@@ -170,7 +187,13 @@ private fun MainAppShell(
     )
 
     val searchState by searchVm.uiState.collectAsStateWithLifecycle()
+    val websiteOpenMode by settingsVm.websiteOpenMode.collectAsStateWithLifecycle()
+    val torrentBoxOpenMode by settingsVm.torrentBoxOpenMode.collectAsStateWithLifecycle()
+    val customDnsConfig by settingsVm.customDnsConfig.collectAsStateWithLifecycle()
+
     var activeDestination by remember { mutableStateOf(AppDestination.SEARCH) }
+    var browserTargetUrl by remember { mutableStateOf<String?>(null) }
+    var browserRequestNonce by remember { mutableIntStateOf(0) }
 
     BackHandler(enabled = activeDestination != AppDestination.SEARCH) {
         activeDestination = AppDestination.SEARCH
@@ -183,7 +206,52 @@ private fun MainAppShell(
         }
     }
 
-    // Collect MagnetReady & snackbar events at shell level so quick actions work from both Search and Vault tabs
+    fun openWebsiteUrl(rawUrl: String) {
+        val valid = validateAndNormalizeWebUrl(rawUrl)
+        if (valid == null) {
+            showMessage("Invalid website URL")
+            return
+        }
+        when (websiteOpenMode) {
+            WebsiteOpenMode.IN_APP -> {
+                browserTargetUrl = valid
+                browserRequestNonce++
+                activeDestination = AppDestination.SITES
+            }
+            WebsiteOpenMode.DEFAULT_BROWSER -> {
+                val opened = IntentActions.openUrlInBrowser(context, valid)
+                if (!opened) {
+                    showMessage("No browser app found to open website")
+                }
+            }
+        }
+    }
+
+    fun openTorrentBoxUrl(rawUrl: String, label: String, magnetCopied: Boolean) {
+        val valid = validateAndNormalizeWebUrl(rawUrl)
+        if (valid == null) {
+            showMessage("Invalid website URL")
+            return
+        }
+        val prefix = if (magnetCopied) "Magnet copied — " else ""
+        when (torrentBoxOpenMode) {
+            WebsiteOpenMode.IN_APP -> {
+                browserTargetUrl = valid
+                browserRequestNonce++
+                activeDestination = AppDestination.SITES
+                showMessage("${prefix}opening $label in app")
+            }
+            WebsiteOpenMode.DEFAULT_BROWSER -> {
+                val opened = IntentActions.openUrlInBrowser(context, valid)
+                showMessage(
+                    if (opened) "${prefix}opening $label in browser"
+                    else if (magnetCopied) "Magnet copied to clipboard"
+                    else "No browser app found to open $label"
+                )
+            }
+        }
+    }
+
     LaunchedEffect(searchVm) {
         searchVm.events.collect { event ->
             when (event) {
@@ -191,11 +259,10 @@ private fun MainAppShell(
                 is SearchUiEvent.MagnetReady -> {
                     IntentActions.copyToClipboard(context, event.title, event.magnetUri)
                     if (!event.openBrowserUrl.isNullOrBlank()) {
-                        val opened = IntentActions.openUrlInBrowser(context, event.openBrowserUrl)
-                        val label = event.targetLabel ?: "browser"
-                        showMessage(
-                            if (opened) "Magnet copied — opening $label in browser"
-                            else "Magnet copied to clipboard"
+                        openTorrentBoxUrl(
+                            rawUrl = event.openBrowserUrl,
+                            label = event.targetLabel ?: "web box",
+                            magnetCopied = true
                         )
                     } else {
                         showMessage("Magnet link copied to clipboard")
@@ -269,18 +336,33 @@ private fun MainAppShell(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.TopCenter
                 ) {
-                    Box(
-                        modifier = Modifier
+                    val containerModifier = if (activeDestination == AppDestination.SITES) {
+                        Modifier.fillMaxSize()
+                    } else {
+                        Modifier
                             .fillMaxSize()
                             .widthIn(max = 760.dp)
-                    ) {
+                    }
+                    Box(modifier = containerModifier) {
                         when (activeDestination) {
                             AppDestination.SEARCH -> SearchScreen(
                                 viewModel = searchVm,
                                 isSignedIn = isSignedIn,
                                 isDarkTheme = isDarkTheme,
+                                websiteOpenMode = websiteOpenMode,
+                                torrentBoxOpenMode = torrentBoxOpenMode,
                                 onToggleTheme = { settingsVm.setDarkTheme(!isDarkTheme) },
                                 onOpenSettings = { activeDestination = AppDestination.SETTINGS },
+                                onOpenWebsiteUrl = ::openWebsiteUrl,
+                                onOpenTorrentBoxUrl = ::openTorrentBoxUrl,
+                                onShowMessage = ::showMessage
+                            )
+                            AppDestination.SITES -> InAppBrowserScreen(
+                                prefsStore = prefsStore,
+                                torrentBoxOpenMode = torrentBoxOpenMode,
+                                customDnsConfig = customDnsConfig,
+                                requestedUrl = browserTargetUrl,
+                                requestNonce = browserRequestNonce,
                                 onShowMessage = ::showMessage
                             )
                             AppDestination.VAULT -> VaultScreen(
@@ -323,6 +405,9 @@ private fun MainAppShell(
                                 onSignOut = {
                                     scope.launch { prefsStore.setGuestModeEnabled(false) }
                                     GoogleAuthManager.signOut(credentialManager, scope)
+                                },
+                                onOpenTorrentBoxUrl = { url, label ->
+                                    openTorrentBoxUrl(url, label, magnetCopied = false)
                                 },
                                 onShowMessage = ::showMessage
                             )

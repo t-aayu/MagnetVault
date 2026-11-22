@@ -11,6 +11,7 @@ object HttpClientFactory {
 
     val defaultClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .dns(CustomAppDns)
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(16, TimeUnit.SECONDS)
             .writeTimeout(16, TimeUnit.SECONDS)
@@ -34,6 +35,7 @@ object HttpClientFactory {
 
     val pingClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .dns(CustomAppDns)
             .connectTimeout(5, TimeUnit.SECONDS)
             .readTimeout(5, TimeUnit.SECONDS)
             .followRedirects(true)

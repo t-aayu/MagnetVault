@@ -64,6 +64,8 @@ import com.example.R
 import com.example.model.QualityTag
 import com.example.model.SortOption
 import com.example.model.TorrentCategory
+import com.example.model.WebsiteOpenMode
+import com.example.ui.components.IndexerErrorFallbackBanner
 import com.example.ui.components.ProviderStatusStrip
 import com.example.ui.components.TorrentDetailBottomSheet
 import com.example.ui.components.TorrentResultCard
@@ -76,8 +78,12 @@ fun SearchScreen(
     viewModel: SearchViewModel,
     isSignedIn: Boolean,
     isDarkTheme: Boolean,
+    websiteOpenMode: WebsiteOpenMode,
+    torrentBoxOpenMode: WebsiteOpenMode,
     onToggleTheme: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenWebsiteUrl: (String) -> Unit,
+    onOpenTorrentBoxUrl: (url: String, label: String, magnetCopied: Boolean) -> Unit,
     onShowMessage: (String) -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -302,15 +308,25 @@ fun SearchScreen(
             ProviderStatusStrip(
                 statuses = state.providerStatuses,
                 onStatusClick = { st ->
-                    val mirrorHost = st.mirrorUsed.removePrefix("https://").removePrefix("http://")
-                    val detail = when {
-                        st.isLoading -> "${st.source.displayName}: Searching…"
-                        st.errorMessage != null -> "${st.source.displayName} error: ${st.errorMessage}"
-                        else -> "${st.source.displayName}: ${st.resultCount} results via $mirrorHost"
+                    val targetUrl = st.webSearchUrl.ifBlank { st.mirrorUsed }
+                    if (targetUrl.isNotBlank()) {
+                        onOpenWebsiteUrl(targetUrl)
+                    } else {
+                        onShowMessage("No website URL available for ${st.source.displayName}")
                     }
-                    onShowMessage(detail)
                 }
             )
+            val failedStatuses = state.providerStatuses.filter {
+                !it.isLoading && it.errorMessage != null && it.webSearchUrl.isNotBlank()
+            }
+            if (failedStatuses.isNotEmpty()) {
+                IndexerErrorFallbackBanner(
+                    failedStatuses = failedStatuses,
+                    openMode = websiteOpenMode,
+                    onOpenSite = { st -> onOpenWebsiteUrl(st.webSearchUrl) },
+                    onChangeModeSettings = onOpenSettings
+                )
+            }
         }
 
         LazyColumn(
@@ -571,22 +587,20 @@ fun SearchScreen(
                 onShowMessage("Magnet link copied to clipboard")
             },
             onOpenSeedrBrowser = { magnet ->
-                if (!magnet.isNullOrBlank()) {
-                    IntentActions.copyToClipboard(context, selected.title, magnet)
-                    onShowMessage("Magnet copied — opening Seedr.cc in browser")
-                } else {
-                    onShowMessage("Opening Seedr.cc in browser")
+                val copied = !magnet.isNullOrBlank()
+                if (copied) {
+                    IntentActions.copyToClipboard(context, selected.title, magnet!!)
                 }
-                IntentActions.openUrlInBrowser(context, IntentActions.SEEDR_WEB_URL)
+                viewModel.dismissTorrentDetail()
+                onOpenTorrentBoxUrl(IntentActions.SEEDR_WEB_URL, "Seedr.cc", copied)
             },
             onOpenTorBoxBrowser = { magnet ->
-                if (!magnet.isNullOrBlank()) {
-                    IntentActions.copyToClipboard(context, selected.title, magnet)
-                    onShowMessage("Magnet copied — opening TorBox in browser")
-                } else {
-                    onShowMessage("Opening TorBox in browser")
+                val copied = !magnet.isNullOrBlank()
+                if (copied) {
+                    IntentActions.copyToClipboard(context, selected.title, magnet!!)
                 }
-                IntentActions.openUrlInBrowser(context, IntentActions.TORBOX_WEB_URL)
+                viewModel.dismissTorrentDetail()
+                onOpenTorrentBoxUrl(IntentActions.TORBOX_WEB_URL, "TorBox", copied)
             },
             onOpenLocalTorrentApp = { magnet ->
                 val opened = IntentActions.openMagnetInLocalApp(context, magnet)
@@ -595,10 +609,15 @@ fun SearchScreen(
                     onShowMessage("No local torrent app found—magnet copied to clipboard")
                 }
             },
+            onOpenWebsitePage = { url ->
+                viewModel.dismissTorrentDetail()
+                onOpenWebsiteUrl(url)
+            },
             onShareMagnet = { magnet ->
                 IntentActions.shareText(context, selected.title, "${selected.title}\n$magnet")
             },
-            onToggleBookmark = { viewModel.toggleBookmark(selected) }
+            onToggleBookmark = { viewModel.toggleBookmark(selected) },
+            torrentBoxOpenMode = torrentBoxOpenMode
         )
     }
 }

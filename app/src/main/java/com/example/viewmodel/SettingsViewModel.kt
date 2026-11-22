@@ -6,11 +6,17 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.firebase.CloudSyncRepository
 import com.example.data.indexers.IndexerAggregatorRepository
 import com.example.data.local.LocalPrefsStore
+import com.example.data.network.CustomAppDns
+import com.example.data.network.CustomDnsTestResult
+import com.example.model.CustomDnsConfig
+import com.example.model.CustomDnsPreset
 import com.example.model.IndexerSource
 import com.example.model.MirrorConfig
 import com.example.model.MirrorHealthResult
+import com.example.model.WebsiteOpenMode
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -25,10 +31,13 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class SettingsTransientState(
     val mirrorHealthMap: Map<String, MirrorHealthResult> = emptyMap(),
-    val isPingingAll: Boolean = false
+    val isPingingAll: Boolean = false,
+    val dnsTestResult: CustomDnsTestResult? = null,
+    val isTestingDns: Boolean = false
 )
 
 class SettingsViewModel(
@@ -45,6 +54,19 @@ class SettingsViewModel(
 
     val isDarkTheme: StateFlow<Boolean> = prefsStore.darkThemeFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), true)
+
+    val websiteOpenMode: StateFlow<WebsiteOpenMode> = prefsStore.websiteOpenModeFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), WebsiteOpenMode.IN_APP)
+
+    val torrentBoxOpenMode: StateFlow<WebsiteOpenMode> = prefsStore.torrentBoxOpenModeFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000L), WebsiteOpenMode.IN_APP)
+
+    val customDnsConfig: StateFlow<CustomDnsConfig> = prefsStore.customDnsConfigFlow
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5000L),
+            CustomDnsConfig(preset = CustomDnsPreset.ADGUARD)
+        )
 
     val mirrorConfigs: StateFlow<Map<IndexerSource, MirrorConfig>> =
         cloudSyncRepo.observeMirrorConfigs()
@@ -63,6 +85,72 @@ class SettingsViewModel(
 
     fun setDarkTheme(enabled: Boolean) {
         viewModelScope.launch { prefsStore.setDarkTheme(enabled) }
+    }
+
+    fun setWebsiteOpenMode(mode: WebsiteOpenMode) {
+        viewModelScope.launch {
+            prefsStore.setWebsiteOpenMode(mode)
+            _messages.emit("Indexer websites will open in ${mode.label}")
+        }
+    }
+
+    fun setTorrentBoxOpenMode(mode: WebsiteOpenMode) {
+        viewModelScope.launch {
+            prefsStore.setTorrentBoxOpenMode(mode)
+            _messages.emit("Seedr.cc & TorBox will open in ${mode.label}")
+        }
+    }
+
+    fun selectDnsPreset(preset: CustomDnsPreset) {
+        viewModelScope.launch {
+            val current = customDnsConfig.value
+            val updated = current.copy(preset = preset)
+            prefsStore.setCustomDnsConfig(updated)
+            CustomAppDns.configure(updated)
+            _transient.update { it.copy(dnsTestResult = null) }
+            val msg = when (preset) {
+                CustomDnsPreset.SYSTEM -> "Switched to System Default DNS"
+                CustomDnsPreset.CUSTOM -> if (updated.customEndpoint.isBlank()) {
+                    "Enter your custom HTTPS DoH URL or hostname below"
+                } else {
+                    "App DNS set to Custom DoH"
+                }
+                else -> "App DNS set to ${preset.displayName}"
+            }
+            _messages.emit(msg)
+        }
+    }
+
+    fun saveCustomDnsEndpoint(rawEndpoint: String) {
+        val normalized = CustomAppDns.validateAndNormalizeDohEndpoint(rawEndpoint)
+        if (normalized == null) {
+            viewModelScope.launch {
+                _messages.emit("Enter a valid public https:// DoH URL or hostname (e.g. dns.nextdns.io/abc123)")
+            }
+            return
+        }
+        viewModelScope.launch {
+            val updated = CustomDnsConfig(
+                preset = CustomDnsPreset.CUSTOM,
+                customEndpoint = normalized
+            )
+            prefsStore.setCustomDnsConfig(updated)
+            CustomAppDns.configure(updated)
+            _transient.update { it.copy(dnsTestResult = null) }
+            _messages.emit("Custom DNS saved: $normalized")
+            testActiveDns()
+        }
+    }
+
+    fun testActiveDns() {
+        val config = customDnsConfig.value
+        viewModelScope.launch {
+            _transient.update { it.copy(isTestingDns = true) }
+            val result = withContext(Dispatchers.IO) {
+                CustomAppDns.testEndpoint(config)
+            }
+            _transient.update { it.copy(isTestingDns = false, dnsTestResult = result) }
+        }
     }
 
     // --- LIVE MIRROR EDITOR & HEALTH CHECKER ---

@@ -6,12 +6,16 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.model.BookmarkRecord
+import com.example.model.CustomDnsConfig
+import com.example.model.CustomDnsPreset
+import com.example.model.CustomSite
 import com.example.model.IndexerSource
 import com.example.model.MirrorConfig
 import com.example.model.QualityAndHealthParser
 import com.example.model.SearchHistoryRecord
 import com.example.model.TorrentCategory
 import com.example.model.TorrentResult
+import com.example.model.WebsiteOpenMode
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -25,6 +29,11 @@ class LocalPrefsStore(private val context: Context) {
     private object Keys {
         val DARK_THEME = booleanPreferencesKey("dark_theme")
         val GUEST_MODE_ENABLED = booleanPreferencesKey("guest_mode_enabled")
+        val WEBSITE_OPEN_MODE = stringPreferencesKey("website_open_mode")
+        val TORRENT_BOX_OPEN_MODE = stringPreferencesKey("torrent_box_open_mode")
+        val CUSTOM_DNS_PRESET = stringPreferencesKey("custom_dns_preset")
+        val CUSTOM_DNS_ENDPOINT = stringPreferencesKey("custom_dns_endpoint")
+        val CUSTOM_SITES_JSON = stringPreferencesKey("custom_sites_json")
         val LOCAL_BOOKMARKS_JSON = stringPreferencesKey("local_bookmarks_json")
         val LOCAL_HISTORY_JSON = stringPreferencesKey("local_history_json")
         val LOCAL_MIRRORS_JSON = stringPreferencesKey("local_mirrors_json")
@@ -38,12 +47,66 @@ class LocalPrefsStore(private val context: Context) {
         prefs[Keys.GUEST_MODE_ENABLED] ?: false
     }
 
+    val websiteOpenModeFlow: Flow<WebsiteOpenMode> = context.magnetVaultDataStore.data.map { prefs ->
+        WebsiteOpenMode.fromNameSafe(prefs[Keys.WEBSITE_OPEN_MODE] ?: WebsiteOpenMode.IN_APP.name)
+    }
+
+    val torrentBoxOpenModeFlow: Flow<WebsiteOpenMode> = context.magnetVaultDataStore.data.map { prefs ->
+        WebsiteOpenMode.fromNameSafe(prefs[Keys.TORRENT_BOX_OPEN_MODE] ?: WebsiteOpenMode.IN_APP.name)
+    }
+
+    val customDnsConfigFlow: Flow<CustomDnsConfig> = context.magnetVaultDataStore.data.map { prefs ->
+        CustomDnsConfig(
+            preset = CustomDnsPreset.fromNameSafe(prefs[Keys.CUSTOM_DNS_PRESET] ?: CustomDnsPreset.ADGUARD.name),
+            customEndpoint = prefs[Keys.CUSTOM_DNS_ENDPOINT] ?: ""
+        )
+    }
+
+    val customSitesFlow: Flow<List<CustomSite>> = context.magnetVaultDataStore.data.map { prefs ->
+        decodeCustomSites(prefs[Keys.CUSTOM_SITES_JSON])
+    }
+
     suspend fun setDarkTheme(enabled: Boolean) {
         context.magnetVaultDataStore.edit { it[Keys.DARK_THEME] = enabled }
     }
 
     suspend fun setGuestModeEnabled(enabled: Boolean) {
         context.magnetVaultDataStore.edit { it[Keys.GUEST_MODE_ENABLED] = enabled }
+    }
+
+    suspend fun setWebsiteOpenMode(mode: WebsiteOpenMode) {
+        context.magnetVaultDataStore.edit { it[Keys.WEBSITE_OPEN_MODE] = mode.name }
+    }
+
+    suspend fun setTorrentBoxOpenMode(mode: WebsiteOpenMode) {
+        context.magnetVaultDataStore.edit { it[Keys.TORRENT_BOX_OPEN_MODE] = mode.name }
+    }
+
+    suspend fun setCustomDnsConfig(config: CustomDnsConfig) {
+        context.magnetVaultDataStore.edit { prefs ->
+            prefs[Keys.CUSTOM_DNS_PRESET] = config.preset.name
+            prefs[Keys.CUSTOM_DNS_ENDPOINT] = config.customEndpoint
+        }
+    }
+
+    suspend fun addCustomSite(name: String, normalizedUrl: String) {
+        val cleanName = name.trim().take(40).ifBlank {
+            normalizedUrl.removePrefix("https://").removePrefix("http://").substringBefore("/").take(30)
+        }
+        val siteId = QualityAndHealthParser.sanitizeDocumentId("site_${normalizedUrl.lowercase(Locale.US).hashCode().toUInt()}")
+        context.magnetVaultDataStore.edit { prefs ->
+            val current = decodeCustomSites(prefs[Keys.CUSTOM_SITES_JSON]).toMutableList()
+            current.removeAll { it.url.equals(normalizedUrl, ignoreCase = true) || it.id == siteId }
+            current.add(0, CustomSite(id = siteId, name = cleanName, url = normalizedUrl, isCustom = true))
+            prefs[Keys.CUSTOM_SITES_JSON] = encodeCustomSites(current.take(25))
+        }
+    }
+
+    suspend fun removeCustomSite(siteId: String) {
+        context.magnetVaultDataStore.edit { prefs ->
+            val updated = decodeCustomSites(prefs[Keys.CUSTOM_SITES_JSON]).filterNot { it.id == siteId }
+            prefs[Keys.CUSTOM_SITES_JSON] = encodeCustomSites(updated)
+        }
     }
 
     // --- LOCAL BOOKMARKS (used when running without Sign-In) ---
@@ -304,5 +367,40 @@ class LocalPrefsStore(private val context: Context) {
                 }
             }
         }.getOrDefault(defaults)
+    }
+
+    private fun encodeCustomSites(list: List<CustomSite>): String {
+        val arr = JSONArray()
+        list.forEach { site ->
+            val obj = JSONObject()
+            obj.put("id", site.id)
+            obj.put("name", site.name)
+            obj.put("url", site.url)
+            arr.put(obj)
+        }
+        return arr.toString()
+    }
+
+    private fun decodeCustomSites(raw: String?): List<CustomSite> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val url = o.optString("url", "").trim()
+                    if (url.startsWith("https://") || url.startsWith("http://")) {
+                        add(
+                            CustomSite(
+                                id = o.optString("id").ifBlank { "site_$i" },
+                                name = o.optString("name").ifBlank { url },
+                                url = url,
+                                isCustom = true
+                            )
+                        )
+                    }
+                }
+            }
+        }.getOrDefault(emptyList())
     }
 }

@@ -63,6 +63,7 @@ import com.example.model.IndexerSource
 import com.example.model.QualityTag
 import com.example.model.SwarmHealth
 import com.example.model.TorrentResult
+import com.example.model.WebsiteOpenMode
 import com.example.ui.theme.LocalTelemetryColors
 import com.example.ui.theme.TelemetryMonoStyle
 
@@ -165,11 +166,12 @@ fun ProviderStatusStrip(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
                     .clickable { onStatusClick(st) }
+                    .testTag("provider_status_${st.source.name}")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     if (st.isLoading) {
                         CircularProgressIndicator(
@@ -206,6 +208,106 @@ fun ProviderStatusStrip(
                         style = TelemetryMonoStyle,
                         color = if (st.errorMessage != null) telemetry.deadRose else MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = "Open ${st.source.displayName} search results",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        modifier = Modifier.size(11.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun IndexerErrorFallbackBanner(
+    failedStatuses: List<IndexerSearchStatus>,
+    openMode: WebsiteOpenMode,
+    onOpenSite: (IndexerSearchStatus) -> Unit,
+    onChangeModeSettings: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val telemetry = LocalTelemetryColors.current
+    if (failedStatuses.isEmpty()) return
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(1.dp, telemetry.deadRose.copy(alpha = 0.55f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .testTag("indexer_error_fallback_banner")
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.ErrorOutline,
+                    contentDescription = null,
+                    tint = telemetry.deadRose,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "Site error — open HTML page (${openMode.label})",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    text = "Settings",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(onClick = onChangeModeSettings)
+                        .padding(horizontal = 6.dp, vertical = 4.dp)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                failedStatuses.forEach { st ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onOpenSite(st) }
+                            .testTag("open_failed_site_${st.source.name}")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (openMode == WebsiteOpenMode.IN_APP) {
+                                    Icons.Filled.Public
+                                } else {
+                                    Icons.AutoMirrored.Filled.OpenInNew
+                                },
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Open ${st.source.displayName}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -464,8 +566,10 @@ fun TorrentDetailBottomSheet(
     onOpenSeedrBrowser: (String?) -> Unit,
     onOpenTorBoxBrowser: (String?) -> Unit,
     onOpenLocalTorrentApp: (String) -> Unit,
+    onOpenWebsitePage: ((String) -> Unit)? = null,
     onShareMagnet: (String) -> Unit,
-    onToggleBookmark: () -> Unit
+    onToggleBookmark: () -> Unit,
+    torrentBoxOpenMode: WebsiteOpenMode = WebsiteOpenMode.IN_APP
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val telemetry = LocalTelemetryColors.current
@@ -619,9 +723,13 @@ fun TorrentDetailBottomSheet(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Open Seedr.cc & TorBox in Default Browser (copies magnet first)
+            // Open Seedr.cc & TorBox in App or Default Browser (copies magnet first)
             Text(
-                text = "OPEN IN BROWSER (COPIES MAGNET FIRST)",
+                text = if (torrentBoxOpenMode == WebsiteOpenMode.IN_APP) {
+                    "OPEN IN APP (COPIES MAGNET FIRST)"
+                } else {
+                    "OPEN IN BROWSER (COPIES MAGNET FIRST)"
+                },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 fontWeight = FontWeight.Bold
@@ -697,6 +805,20 @@ fun TorrentDetailBottomSheet(
                     Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(stringResource(R.string.action_open_local))
+                }
+
+                if (onOpenWebsitePage != null && torrent.detailPageUrl.startsWith("http", ignoreCase = true)) {
+                    OutlinedButton(
+                        onClick = { onOpenWebsitePage(torrent.detailPageUrl) },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .height(48.dp)
+                            .testTag("open_torrent_webpage_button")
+                    ) {
+                        Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(stringResource(R.string.action_open_website))
+                    }
                 }
 
                 OutlinedButton(

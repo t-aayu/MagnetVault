@@ -142,7 +142,25 @@ data class IndexerSearchStatus(
     val mirrorUsed: String,
     val isLoading: Boolean = false,
     val resultCount: Int = 0,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    val webSearchUrl: String = ""
+)
+
+enum class WebsiteOpenMode(val label: String) {
+    IN_APP("In-App HTML"),
+    DEFAULT_BROWSER("Default Browser");
+
+    companion object {
+        fun fromNameSafe(raw: String): WebsiteOpenMode =
+            entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: IN_APP
+    }
+}
+
+data class CustomSite(
+    val id: String,
+    val name: String,
+    val url: String,
+    val isCustom: Boolean = true
 )
 
 data class MirrorConfig(
@@ -264,4 +282,68 @@ object QualityAndHealthParser {
             .trim('_')
         return if (cleaned.isBlank()) "doc_${System.currentTimeMillis()}" else cleaned.take(120)
     }
+}
+
+enum class CustomDnsPreset(
+    val displayName: String,
+    val description: String,
+    val dohUrl: String,
+    val blocksAds: Boolean
+) {
+    ADGUARD(
+        displayName = "AdGuard DNS",
+        description = "Blocks ads, trackers & pop-unders",
+        dohUrl = "https://dns.adguard-dns.com/dns-query",
+        blocksAds = true
+    ),
+    MULLVAD_ADBLOCK(
+        displayName = "Mullvad Adblock",
+        description = "Privacy-first ad & tracker filter",
+        dohUrl = "https://adblock.dns.mullvad.net/dns-query",
+        blocksAds = true
+    ),
+    CONTROLD_ADBLOCK(
+        displayName = "Control D",
+        description = "Blocks ads, trackers & malware",
+        dohUrl = "https://freedns.controld.com/p2",
+        blocksAds = true
+    ),
+    CLOUDFLARE(
+        displayName = "Cloudflare",
+        description = "Fast 1.1.1.1 encrypted DNS",
+        dohUrl = "https://cloudflare-dns.com/dns-query",
+        blocksAds = false
+    ),
+    CUSTOM(
+        displayName = "Custom DoH",
+        description = "NextDNS, Control D, or custom HTTPS DNS",
+        dohUrl = "",
+        blocksAds = true
+    ),
+    SYSTEM(
+        displayName = "System Default",
+        description = "Use device network DNS",
+        dohUrl = "",
+        blocksAds = false
+    );
+
+    companion object {
+        fun fromNameSafe(raw: String): CustomDnsPreset =
+            entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: ADGUARD
+    }
+}
+
+data class CustomDnsConfig(
+    val preset: CustomDnsPreset = CustomDnsPreset.ADGUARD,
+    val customEndpoint: String = ""
+) {
+    val activeDohUrl: String
+        get() = when (preset) {
+            CustomDnsPreset.SYSTEM -> ""
+            CustomDnsPreset.CUSTOM -> customEndpoint
+            else -> preset.dohUrl
+        }
+
+    val isEnabled: Boolean
+        get() = preset != CustomDnsPreset.SYSTEM && activeDohUrl.isNotBlank()
 }

@@ -2,12 +2,17 @@ package com.example
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.example.data.indexers.IndexerAggregatorRepository
 import com.example.data.indexers.IndexerParsers
+import com.example.data.network.CustomAppDns
 import com.example.model.IndexerSource
 import com.example.model.TorrentCategory
+import com.example.ui.browser.isDirectDownloadUrl
+import com.example.ui.browser.validateAndNormalizeWebUrl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -176,5 +181,147 @@ class ExampleRobolectricTest {
         assertEquals("3.00 GB", parsed[0].sizeLabel)
         assertEquals("Mar 10, 2026", parsed[0].uploadDateLabel)
         assertTrue(parsed[0].magnetUri!!.startsWith("magnet:?xt=urn:btih:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+    }
+
+    @Test
+    fun `web url validator allows http and https domains and rejects unsafe schemes`() {
+        assertEquals("https://1337x.to", validateAndNormalizeWebUrl("https://1337x.to"))
+        assertEquals("https://x1337x.cc", validateAndNormalizeWebUrl("x1337x.cc"))
+        assertEquals("http://eztvx.to/search/dune", validateAndNormalizeWebUrl("http://eztvx.to/search/dune"))
+
+        assertNull(validateAndNormalizeWebUrl("javascript:alert(1)"))
+        assertNull(validateAndNormalizeWebUrl("file:///etc/passwd"))
+        assertNull(validateAndNormalizeWebUrl("content://com.example/secret"))
+        assertNull(validateAndNormalizeWebUrl("data:text/html,<script>alert(1)</script>"))
+        assertNull(validateAndNormalizeWebUrl("intent://scan/#Intent;end"))
+        assertNull(validateAndNormalizeWebUrl("mailto:user@example.com"))
+        assertNull(validateAndNormalizeWebUrl("https://user:pass@1337x.to"))
+        assertNull(validateAndNormalizeWebUrl("https://1337x.to bad"))
+        assertNull(validateAndNormalizeWebUrl("localhost"))
+    }
+
+    @Test
+    fun `web search fallback builds human browsable html urls skipping json apis`() {
+        val repo = IndexerAggregatorRepository()
+        val x1337Url = repo.buildWebSearchUrl(
+            IndexerSource.X1337,
+            IndexerSource.X1337.defaultMirrors,
+            "ubuntu 24"
+        )
+        assertFalse(x1337Url.contains("knaben"))
+        assertTrue(x1337Url.startsWith("https://"))
+        assertTrue(x1337Url.contains("/search/ubuntu%2024/1/"))
+
+        val eztvUrl = repo.buildWebSearchUrl(
+            IndexerSource.EZTV,
+            IndexerSource.EZTV.defaultMirrors,
+            "breaking bad"
+        )
+        assertTrue(eztvUrl.startsWith("https://"))
+        assertTrue(eztvUrl.contains("/search/"))
+
+        val tpbUrl = repo.buildWebSearchUrl(
+            IndexerSource.TPB,
+            IndexerSource.TPB.defaultMirrors,
+            "linux"
+        )
+        assertFalse(tpbUrl.contains("apibay.org"))
+        assertTrue(tpbUrl.contains("/search.php?q=linux"))
+
+        val tpbFallback = repo.buildWebSearchUrl(
+            IndexerSource.TPB,
+            listOf("https://apibay.org"),
+            "linux"
+        )
+        assertEquals("https://thepiratebay.org/search.php?q=linux", tpbFallback)
+    }
+
+    @Test
+    fun `direct download detector matches seedr torbox and media archive links only`() {
+        assertTrue(isDirectDownloadUrl("https://cdn.seedr.cc/ff_get/12345/movie.mkv"))
+        assertTrue(isDirectDownloadUrl("https://api.torbox.app/v1/api/torrents/requestdl?token=abc"))
+        assertTrue(isDirectDownloadUrl("https://files.example.com/archive/release.zip"))
+        assertTrue(isDirectDownloadUrl("https://cdn.example.com/dl/video?response-content-disposition=attachment"))
+
+        assertFalse(isDirectDownloadUrl("https://www.seedr.cc/files"))
+        assertFalse(isDirectDownloadUrl("https://torbox.app/dashboard"))
+        assertFalse(isDirectDownloadUrl("https://1337x.to/torrent/12345/Ubuntu-24-04/"))
+        assertFalse(isDirectDownloadUrl("file:///sdcard/movie.mp4"))
+        assertFalse(isDirectDownloadUrl("javascript:download('movie.mp4')"))
+    }
+
+    @Test
+    fun `custom doh validator enforces https and rejects private hosts and unsafe schemes`() {
+        assertEquals(
+            "https://dns.nextdns.io/abc123",
+            CustomAppDns.validateAndNormalizeDohEndpoint("https://dns.nextdns.io/abc123")
+        )
+        assertEquals(
+            "https://dns.adguard-dns.com/dns-query",
+            CustomAppDns.validateAndNormalizeDohEndpoint("dns.adguard-dns.com")
+        )
+        assertEquals(
+            "https://freedns.controld.com/p2",
+            CustomAppDns.validateAndNormalizeDohEndpoint("freedns.controld.com/p2")
+        )
+
+        assertNull(CustomAppDns.validateAndNormalizeDohEndpoint("http://dns.adguard-dns.com/dns-query"))
+        assertNull(CustomAppDns.validateAndNormalizeDohEndpoint("https://localhost/dns-query"))
+        assertNull(CustomAppDns.validateAndNormalizeDohEndpoint("https://127.0.0.1/dns-query"))
+        assertNull(CustomAppDns.validateAndNormalizeDohEndpoint("https://192.168.1.1/dns-query"))
+        assertNull(CustomAppDns.validateAndNormalizeDohEndpoint("https://10.0.0.1/dns-query"))
+        assertNull(CustomAppDns.validateAndNormalizeDohEndpoint("https://user:pass@dns.nextdns.io/abc"))
+        assertNull(CustomAppDns.validateAndNormalizeDohEndpoint("javascript:alert(1)"))
+    }
+
+    @Test
+    fun `dns wire packet builder and parser detect normal ips sinkholes and nxdomain`() {
+        val query = CustomAppDns.buildDnsQueryPacket("example.com", qtype = 1)
+        assertNotNull(query)
+        assertTrue(query!!.size > 12)
+
+        // Synthetic DNS A-record response for example.com -> 93.184.216.34
+        val validResponse = byteArrayOf(
+            0x00, 0x00, // ID
+            0x81.toByte(), 0x80.toByte(), // Flags: response, RCODE=0
+            0x00, 0x01, // QDCOUNT=1
+            0x00, 0x01, // ANCOUNT=1
+            0x00, 0x00, 0x00, 0x00, // NS/AR=0
+            // Question: example.com
+            7, 'e'.code.toByte(), 'x'.code.toByte(), 'a'.code.toByte(), 'm'.code.toByte(), 'p'.code.toByte(), 'l'.code.toByte(), 'e'.code.toByte(),
+            3, 'c'.code.toByte(), 'o'.code.toByte(), 'm'.code.toByte(),
+            0, 0x00, 0x01, 0x00, 0x01,
+            // Answer: pointer 0xC00C, type A, class IN, ttl 60, rdlen 4, IP 93.184.216.34
+            0xC0.toByte(), 0x0C, 0x00, 0x01, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x3C, 0x00, 0x04,
+            93, 184.toByte(), 216.toByte(), 34
+        )
+        val parsedValid = CustomAppDns.parseDnsResponsePacket(validResponse)
+        assertNotNull(parsedValid)
+        assertFalse(parsedValid!!.isBlocked)
+        assertEquals(1, parsedValid.addresses.size)
+        assertEquals("93.184.216.34", parsedValid.addresses.first().hostAddress)
+
+        // Synthetic AdGuard/NextDNS sinkhole response -> 0.0.0.0
+        val sinkholeResponse = validResponse.copyOf().apply {
+            this[size - 4] = 0
+            this[size - 3] = 0
+            this[size - 2] = 0
+            this[size - 1] = 0
+        }
+        val parsedSinkhole = CustomAppDns.parseDnsResponsePacket(sinkholeResponse)
+        assertNotNull(parsedSinkhole)
+        assertTrue(parsedSinkhole!!.isBlocked)
+        assertTrue(parsedSinkhole.isSinkholed)
+
+        // Synthetic NXDOMAIN response (RCODE=3)
+        val nxdomainResponse = byteArrayOf(
+            0x00, 0x00,
+            0x81.toByte(), 0x83.toByte(), // RCODE=3 (NXDOMAIN)
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        )
+        val parsedNx = CustomAppDns.parseDnsResponsePacket(nxdomainResponse)
+        assertNotNull(parsedNx)
+        assertTrue(parsedNx!!.isBlocked)
     }
 }
