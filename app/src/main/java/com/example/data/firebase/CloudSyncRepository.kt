@@ -12,6 +12,8 @@ import com.example.model.SearchHistoryRecord
 import com.example.model.TorrentCategory
 import com.example.model.TorrentResult
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.auth
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
@@ -38,7 +40,9 @@ class CloudSyncRepository(
     private val prefsStore: LocalPrefsStore,
     val isCloudMode: Boolean
 ) {
-    private val auth = Firebase.auth
+    private val auth: FirebaseAuth? by lazy {
+        if (FirebaseApp.getApps(appContext).isNotEmpty()) Firebase.auth else null
+    }
 
     private val db: FirebaseFirestore by lazy {
         FirebaseFirestore.getInstance(
@@ -47,7 +51,7 @@ class CloudSyncRepository(
     }
 
     private fun requireUserId(): String {
-        val uid = auth.currentUser?.uid
+        val uid = auth?.currentUser?.uid
         if (uid.isNullOrBlank()) {
             throw IllegalStateException("User must be signed in with Google before accessing Firestore.")
         }
@@ -76,7 +80,7 @@ class CloudSyncRepository(
                             .firstOrNull()
                         if (fsErr == null && error is CancellationException) throw error
                         val toLog = fsErr ?: (error as? Exception)
-                        if (toLog != null && auth.currentUser?.uid == uid) {
+                        if (toLog != null && auth?.currentUser?.uid == uid) {
                             handleFirestoreError(toLog, OperationType.LIST, path)
                         }
                         throw error
@@ -90,7 +94,7 @@ class CloudSyncRepository(
         if (!isCloudMode) {
             return runCatching { prefsStore.addLocalBookmark(docId, torrent) }
         }
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/bookmarks/$docId"
+        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/bookmarks/$docId"
         return try {
             val uid = requireUserId()
             val ref = db.collection("users").document(uid).collection("bookmarks").document(docId)
@@ -124,7 +128,7 @@ class CloudSyncRepository(
         if (!isCloudMode) {
             return runCatching { prefsStore.removeLocalBookmark(safeId) }
         }
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/bookmarks/$safeId"
+        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/bookmarks/$safeId"
         return try {
             val uid = requireUserId()
             val ref = db.collection("users").document(uid).collection("bookmarks").document(safeId)
@@ -167,7 +171,7 @@ class CloudSyncRepository(
                             .firstOrNull()
                         if (fsErr == null && error is CancellationException) throw error
                         val toLog = fsErr ?: (error as? Exception)
-                        if (toLog != null && auth.currentUser?.uid == uid) {
+                        if (toLog != null && auth?.currentUser?.uid == uid) {
                             handleFirestoreError(toLog, OperationType.LIST, path)
                         }
                         throw error
@@ -185,7 +189,7 @@ class CloudSyncRepository(
         val entryId = QualityAndHealthParser.sanitizeDocumentId(
             "q_${trimmed.lowercase(Locale.US).hashCode().toUInt()}"
         )
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/search_history/$entryId"
+        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/search_history/$entryId"
         return try {
             val uid = requireUserId()
             val ref = db.collection("users").document(uid).collection("search_history").document(entryId)
@@ -215,7 +219,7 @@ class CloudSyncRepository(
         if (!isCloudMode) {
             return runCatching { prefsStore.deleteLocalSearchHistory(safeId) }
         }
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/search_history/$safeId"
+        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/search_history/$safeId"
         return try {
             val uid = requireUserId()
             val ref = db.collection("users").document(uid).collection("search_history").document(safeId)
@@ -234,7 +238,7 @@ class CloudSyncRepository(
         if (!isCloudMode) {
             return runCatching { prefsStore.clearAllLocalSearchHistory() }
         }
-        var path = "users/${auth.currentUser?.uid ?: "unauthenticated"}/search_history"
+        var path = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/search_history"
         return try {
             val uid = requireUserId()
             path = "users/$uid/search_history"
@@ -278,7 +282,7 @@ class CloudSyncRepository(
                             .firstOrNull()
                         if (fsErr == null && error is CancellationException) throw error
                         val toLog = fsErr ?: (error as? Exception)
-                        if (toLog != null && auth.currentUser?.uid == uid) {
+                        if (toLog != null && auth?.currentUser?.uid == uid) {
                             handleFirestoreError(toLog, OperationType.LIST, path)
                         }
                         throw error
@@ -292,7 +296,7 @@ class CloudSyncRepository(
             return runCatching { prefsStore.saveLocalMirrorConfig(config) }
         }
         val providerId = config.provider.name
-        var docPath = "users/${auth.currentUser?.uid ?: "unauthenticated"}/mirror_configs/$providerId"
+        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/mirror_configs/$providerId"
         return try {
             val uid = requireUserId()
             val ref = db.collection("users").document(uid)

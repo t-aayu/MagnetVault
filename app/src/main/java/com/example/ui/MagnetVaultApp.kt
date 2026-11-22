@@ -104,26 +104,31 @@ fun MagnetVaultApp() {
         CustomAppDns.configure(customDnsConfig)
     }
 
-    var currentUser by remember { mutableStateOf(Firebase.auth.currentUser) }
+    val firebaseConfigured = remember(context) { GoogleAuthManager.isFirebaseConfigured(context) }
+    var currentUser by remember { mutableStateOf(GoogleAuthManager.currentUserOrNull(context)) }
 
-    DisposableEffect(Unit) {
-        val listener = FirebaseAuth.AuthStateListener { auth ->
-            currentUser = auth.currentUser
+    DisposableEffect(firebaseConfigured) {
+        if (!firebaseConfigured) {
+            onDispose { }
+        } else {
+            val listener = FirebaseAuth.AuthStateListener { auth ->
+                currentUser = auth.currentUser
+            }
+            Firebase.auth.addAuthStateListener(listener)
+            onDispose { Firebase.auth.removeAuthStateListener(listener) }
         }
-        Firebase.auth.addAuthStateListener(listener)
-        onDispose { Firebase.auth.removeAuthStateListener(listener) }
     }
 
     MagnetVaultTheme(darkTheme = isDarkTheme) {
         when {
-            currentUser == null && guestModeEnabled == null -> {
+            firebaseConfigured && currentUser == null && guestModeEnabled == null -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             }
-            currentUser == null && guestModeEnabled == false -> {
+            firebaseConfigured && currentUser == null && guestModeEnabled == false -> {
                 AuthScreen(
-                    onAuthSuccess = { currentUser = Firebase.auth.currentUser },
+                    onAuthSuccess = { currentUser = GoogleAuthManager.currentUserOrNull(context) },
                     onContinueWithoutSignIn = {
                         scope.launch { prefsStore.setGuestModeEnabled(true) }
                     }
@@ -141,7 +146,7 @@ fun MagnetVaultApp() {
                         userName = user?.displayName,
                         prefsStore = prefsStore,
                         isDarkTheme = isDarkTheme,
-                        onSignedIn = { currentUser = Firebase.auth.currentUser }
+                        onSignedIn = { currentUser = GoogleAuthManager.currentUserOrNull(context) }
                     )
                 }
             }

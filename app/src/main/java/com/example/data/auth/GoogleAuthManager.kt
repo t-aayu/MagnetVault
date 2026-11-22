@@ -9,12 +9,13 @@ import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
-import com.example.R
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential.Companion.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
 import com.google.firebase.Firebase
+import com.google.firebase.FirebaseApp
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.auth
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,26 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 object GoogleAuthManager {
+
+    fun isFirebaseConfigured(context: Context): Boolean =
+        runCatching { FirebaseApp.getApps(context).isNotEmpty() }.getOrDefault(false)
+
+    fun currentUserOrNull(context: Context): FirebaseUser? =
+        if (isFirebaseConfigured(context)) runCatching { Firebase.auth.currentUser }.getOrNull() else null
+
+    /**
+     * Resolves `default_web_client_id` dynamically so the app still compiles and runs in Local Mode
+     * when built without `app/google-services.json` (e.g., open-source GitHub releases).
+     */
+    private fun resolveDefaultWebClientId(context: Context): String? {
+        val resId = context.resources.getIdentifier(
+            "default_web_client_id",
+            "string",
+            context.packageName
+        )
+        if (resId == 0) return null
+        return runCatching { context.getString(resId).trim().takeIf { it.isNotEmpty() } }.getOrNull()
+    }
 
     private fun Context.findActivity(): Activity? {
         var ctx = this
@@ -44,13 +65,16 @@ object GoogleAuthManager {
         onAuthSuccess: () -> Unit,
         onUnauthenticated: () -> Unit
     ) {
+        if (!isFirebaseConfigured(context)) {
+            onUnauthenticated()
+            return
+        }
         if (Firebase.auth.currentUser != null) {
             onAuthSuccess()
             return
         }
-        val clientId = try {
-            context.getString(R.string.default_web_client_id)
-        } catch (_: Exception) {
+        val clientId = resolveDefaultWebClientId(context)
+        if (clientId == null) {
             onUnauthenticated()
             return
         }
@@ -92,10 +116,13 @@ object GoogleAuthManager {
         onAuthError: (String) -> Unit,
         onAuthCancelled: () -> Unit
     ) {
-        val clientId = try {
-            context.getString(R.string.default_web_client_id)
-        } catch (_: Exception) {
-            onAuthError("Google Sign-In configuration missing: default_web_client_id not found.")
+        if (!isFirebaseConfigured(context)) {
+            onAuthError("Cloud sign-in is not configured in this build. Continue in Local Mode.")
+            return
+        }
+        val clientId = resolveDefaultWebClientId(context)
+        if (clientId == null) {
+            onAuthError("Google Sign-In is not configured (missing google-services.json). Use Local Mode instead.")
             return
         }
         val activity = context.findActivity()
@@ -144,7 +171,7 @@ object GoogleAuthManager {
                 } catch (e: Exception) {
                     Log.w("Auth", "Failed to clear credential state: ${e.message}")
                 } finally {
-                    Firebase.auth.signOut()
+                    runCatching { Firebase.auth.signOut() }
                     onSignOutComplete()
                 }
             }
