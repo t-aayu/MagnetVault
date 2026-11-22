@@ -28,6 +28,8 @@ jobs:
   build-and-release:
     name: Build & Publish GitHub Release
     runs-on: ubuntu-latest
+    env:
+      GRADLE_OPTS: -Djava.awt.headless=true
 
     steps:
       - name: Checkout repository
@@ -38,6 +40,13 @@ jobs:
         with:
           distribution: temurin
           java-version: '21'
+
+      - name: Accept Android SDK licenses
+        shell: bash
+        run: |
+          if [[ -n "${ANDROID_HOME:-}" && -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]]; then
+            yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
+          fi
 
       - name: Set up Gradle 9.3.1
         uses: gradle/actions/setup-gradle@v4
