@@ -16,6 +16,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -40,30 +42,39 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.GppBad
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
@@ -111,6 +122,19 @@ fun InAppBrowserChrome(
     val latestShowMessage by rememberUpdatedState(onShowMessage)
     val latestConfiguredHttpHosts by rememberUpdatedState(configuredHttpHosts)
 
+    var isEditingUrl by rememberSaveable { mutableStateOf(false) }
+    var showOverflowMenu by rememberSaveable { mutableStateOf(false) }
+    val urlFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(sessionState.currentUrl) {
+        isEditingUrl = false
+    }
+    LaunchedEffect(isEditingUrl) {
+        if (isEditingUrl) {
+            urlFocusRequester.requestFocus()
+        }
+    }
+
     fun handleDownloadIntercepted(
         rawUrl: String,
         contentDisposition: String?,
@@ -148,157 +172,173 @@ fun InAppBrowserChrome(
             .background(MaterialTheme.colorScheme.background)
             .ambientGlassBackdrop(telemetry)
     ) {
-        // Hostname & Session Header Row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // Single Compact Address & Navigation Bar (~44dp total height to maximize page viewport)
+        Surface(
+            color = telemetry.chromeTranslucent,
+            modifier = Modifier.fillMaxWidth()
         ) {
-            IconButton(
-                onClick = onReturnToSitesDirectory,
+            Row(
                 modifier = Modifier
-                    .size(48.dp)
-                    .testTag("browser_sites_home_button")
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Filled.Apps,
-                    contentDescription = "Back to Sites list",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Surface(
-                color = if (sessionState.isLegacyHttpSession) {
-                    telemetry.leecherAmberContainer
-                } else {
-                    telemetry.glassSurfaceElevated
-                },
-                shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(
-                    0.75.dp,
-                    if (sessionState.isLegacyHttpSession) {
-                        telemetry.leecherAmber.copy(alpha = 0.45f)
-                    } else {
-                        telemetry.cardBorder
-                    }
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("browser_hostname_badge")
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                IconButton(
+                    onClick = onReturnToSitesDirectory,
+                    modifier = Modifier
+                        .size(38.dp, 40.dp)
+                        .testTag("browser_sites_home_button")
                 ) {
                     Icon(
-                        imageVector = if (sessionState.isLegacyHttpSession) Icons.Filled.WarningAmber else Icons.Filled.Lock,
-                        contentDescription = if (sessionState.isLegacyHttpSession) "HTTP mirror exception" else "HTTPS",
-                        tint = if (sessionState.isLegacyHttpSession) telemetry.leecherAmber else telemetry.seederGreen,
-                        modifier = Modifier.size(14.dp)
+                        imageVector = Icons.Filled.Apps,
+                        contentDescription = "Back to Sites list",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(19.dp)
                     )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = sessionState.currentHostname.ifBlank { "Sites Browser" },
-                        style = TelemetryMonoStyle.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (sessionState.isLegacyHttpSession) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "HTTP",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = telemetry.leecherAmber,
-                            fontWeight = FontWeight.Bold
-                        )
+                }
+
+                // Unified compact address pill: displays hostname by default, switches to editable URL bar on tap
+                Surface(
+                    color = when {
+                        isEditingUrl -> telemetry.glassSurfaceElevated
+                        sessionState.isLegacyHttpSession -> telemetry.leecherAmberContainer
+                        else -> telemetry.glassSurface
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(
+                        0.75.dp,
+                        when {
+                            isEditingUrl -> MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)
+                            sessionState.isLegacyHttpSession -> telemetry.leecherAmber.copy(alpha = 0.45f)
+                            else -> telemetry.cardBorder.copy(alpha = 0.85f)
+                        }
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                ) {
+                    if (isEditingUrl) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(start = 10.dp, end = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (sessionState.addressInput.isEmpty()) {
+                                    Text(
+                                        text = "Enter URL (e.g. 1337x.to)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = sessionState.addressInput,
+                                    onValueChange = { sessionState.addressInput = it },
+                                    singleLine = true,
+                                    textStyle = TelemetryMonoStyle.copy(color = MaterialTheme.colorScheme.onSurface),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                                    keyboardActions = KeyboardActions(
+                                        onGo = {
+                                            focusManager.clearFocus()
+                                            isEditingUrl = false
+                                            onNavigateToUrl(sessionState.addressInput)
+                                        }
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRequester(urlFocusRequester)
+                                        .testTag("browser_url_input")
+                                )
+                            }
+                            IconButton(
+                                onClick = {
+                                    focusManager.clearFocus()
+                                    isEditingUrl = false
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = "Cancel URL edit",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Row(
+                            modifier = Modifier.fillMaxSize(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp))
+                                    .clickable { isEditingUrl = true }
+                                    .padding(start = 9.dp, end = 4.dp)
+                                    .testTag("browser_hostname_badge"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (sessionState.isLegacyHttpSession) Icons.Filled.WarningAmber else Icons.Filled.Lock,
+                                    contentDescription = if (sessionState.isLegacyHttpSession) "HTTP mirror exception" else "HTTPS",
+                                    tint = if (sessionState.isLegacyHttpSession) telemetry.leecherAmber else telemetry.seederGreen,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = sessionState.currentHostname.ifBlank {
+                                        sessionState.addressInput.ifBlank { "Enter URL" }
+                                    },
+                                    style = TelemetryMonoStyle.copy(fontWeight = FontWeight.SemiBold),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (sessionState.isLegacyHttpSession) {
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "HTTP",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = telemetry.leecherAmber,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    if (sessionState.isLoading) sessionState.stopLoading() else sessionState.reload()
+                                },
+                                modifier = Modifier
+                                    .size(34.dp, 38.dp)
+                                    .testTag("browser_reload_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (sessionState.isLoading) Icons.Filled.Close else Icons.Filled.Refresh,
+                                    contentDescription = if (sessionState.isLoading) "Stop loading" else "Reload page",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(17.dp)
+                                )
+                            }
+                        }
                     }
                 }
-            }
 
-            IconButton(
-                onClick = onDiscardSession,
-                modifier = Modifier
-                    .size(48.dp)
-                    .testTag("browser_discard_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = "Discard browser session",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-
-        // Address Bar Row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            OutlinedTextField(
-                value = sessionState.addressInput,
-                onValueChange = { sessionState.addressInput = it },
-                singleLine = true,
-                placeholder = { Text("Enter URL (e.g. 1337x.to)", style = MaterialTheme.typography.bodySmall) },
-                textStyle = TelemetryMonoStyle.copy(color = MaterialTheme.colorScheme.onSurface),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
-                keyboardActions = KeyboardActions(
-                    onGo = {
-                        focusManager.clearFocus()
-                        onNavigateToUrl(sessionState.addressInput)
-                    }
-                ),
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = telemetry.glassSurfaceElevated,
-                    unfocusedContainerColor = telemetry.glassSurface,
-                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.85f),
-                    unfocusedBorderColor = telemetry.cardBorder.copy(alpha = 0.75f),
-                    cursorColor = MaterialTheme.colorScheme.primary
-                ),
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("browser_url_input")
-            )
-
-            IconButton(
-                onClick = {
-                    if (sessionState.isLoading) sessionState.stopLoading() else sessionState.reload()
-                },
-                modifier = Modifier
-                    .size(48.dp)
-                    .testTag("browser_reload_button")
-            ) {
-                Icon(
-                    imageVector = if (sessionState.isLoading) Icons.Filled.Close else Icons.Filled.Refresh,
-                    contentDescription = if (sessionState.isLoading) "Stop loading" else "Reload page",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(21.dp)
-                )
-            }
-        }
-
-        // Browser Navigation & Security Controls Bar (48dp touch targets)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(
                     onClick = { sessionState.goBack() },
                     enabled = sessionState.canGoBack,
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(34.dp, 40.dp)
                         .testTag("browser_back_button")
                 ) {
                     Icon(
@@ -309,7 +349,7 @@ fun InAppBrowserChrome(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                         },
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
@@ -317,7 +357,7 @@ fun InAppBrowserChrome(
                     onClick = { sessionState.goForward() },
                     enabled = sessionState.canGoForward,
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(34.dp, 40.dp)
                         .testTag("browser_forward_button")
                 ) {
                     Icon(
@@ -328,75 +368,112 @@ fun InAppBrowserChrome(
                         } else {
                             MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
                         },
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
-            }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                if (customDnsConfig.isEnabled || sessionState.blockedAdsCount > 0) {
-                    Surface(
-                        color = if (customDnsConfig.isEnabled) telemetry.seederGreenContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.testTag("browser_dns_status_pill")
+                Box {
+                    IconButton(
+                        onClick = { showOverflowMenu = true },
+                        modifier = Modifier
+                            .size(34.dp, 40.dp)
+                            .testTag("browser_more_button")
                     ) {
-                        Text(
-                            text = buildString {
-                                append(if (customDnsConfig.isEnabled) customDnsConfig.preset.displayName else "Shield")
-                                if (sessionState.blockedAdsCount > 0) {
-                                    append(" • ")
-                                    append(sessionState.blockedAdsCount)
-                                    append(" blocked")
-                                }
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (customDnsConfig.isEnabled) telemetry.seederGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        Icon(
+                            imageVector = Icons.Filled.MoreVert,
+                            contentDescription = "Browser options",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(19.dp)
                         )
                     }
-                }
 
-                IconButton(
-                    onClick = {
-                        sessionState.popupShieldEnabled = !sessionState.popupShieldEnabled
-                        latestShowMessage(
-                            if (sessionState.popupShieldEnabled) "Popup & ad-redirect shield enabled"
-                            else "Popup shield paused for this session"
+                    DropdownMenu(
+                        expanded = showOverflowMenu,
+                        onDismissRequest = { showOverflowMenu = false },
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ) {
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            },
+                            text = { Text("Open in external browser") },
+                            onClick = {
+                                showOverflowMenu = false
+                                val safe = BrowserUrlPolicy.validateAndNormalizeWebUrl(sessionState.currentUrl)
+                                if (safe != null) {
+                                    IntentActions.openUrlInBrowser(context, safe)
+                                }
+                            },
+                            modifier = Modifier.testTag("browser_open_external_button")
                         )
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("browser_shield_toggle")
-                ) {
-                    Icon(
-                        imageVector = if (sessionState.popupShieldEnabled) Icons.Filled.Shield else Icons.Outlined.Shield,
-                        contentDescription = "Toggle popup shield",
-                        tint = if (sessionState.popupShieldEnabled) telemetry.seederGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                IconButton(
-                    onClick = {
-                        val safe = BrowserUrlPolicy.validateAndNormalizeWebUrl(sessionState.currentUrl)
-                        if (safe != null) {
-                            IntentActions.openUrlInBrowser(context, safe)
-                        }
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .testTag("browser_open_external_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                        contentDescription = "Open current page in default browser",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(20.dp)
-                    )
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = if (sessionState.popupShieldEnabled) Icons.Filled.Shield else Icons.Outlined.Shield,
+                                    contentDescription = null,
+                                    tint = if (sessionState.popupShieldEnabled) telemetry.seederGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            },
+                            text = {
+                                Column {
+                                    Text(
+                                        text = if (sessionState.popupShieldEnabled) "Popup shield: On" else "Popup shield: Paused",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    if (customDnsConfig.isEnabled || sessionState.blockedAdsCount > 0) {
+                                        Text(
+                                            text = buildString {
+                                                append(if (customDnsConfig.isEnabled) customDnsConfig.preset.displayName else "Shield")
+                                                if (sessionState.blockedAdsCount > 0) {
+                                                    append(" • ${sessionState.blockedAdsCount} blocked")
+                                                }
+                                            },
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (customDnsConfig.isEnabled) telemetry.seederGreen else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.testTag("browser_dns_status_pill")
+                                        )
+                                    }
+                                }
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                sessionState.popupShieldEnabled = !sessionState.popupShieldEnabled
+                                latestShowMessage(
+                                    if (sessionState.popupShieldEnabled) "Popup & ad-redirect shield enabled"
+                                    else "Popup shield paused for this session"
+                                )
+                            },
+                            modifier = Modifier.testTag("browser_shield_toggle")
+                        )
+                        HorizontalDivider(color = telemetry.cardBorder.copy(alpha = 0.6f))
+                        DropdownMenuItem(
+                            leadingIcon = {
+                                Icon(
+                                    imageVector = Icons.Filled.Close,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            },
+                            text = {
+                                Text(
+                                    text = "Close browser tab",
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            },
+                            onClick = {
+                                showOverflowMenu = false
+                                onDiscardSession()
+                            },
+                            modifier = Modifier.testTag("browser_discard_button")
+                        )
+                    }
                 }
             }
         }

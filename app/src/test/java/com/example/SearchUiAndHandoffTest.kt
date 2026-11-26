@@ -176,7 +176,7 @@ class SearchUiAndHandoffTest {
     }
 
     @Test
-    fun `search home does not auto-fetch trending and paste magnet validates locally without submitting invalid input`() {
+    fun `search home does not auto-fetch trending removes paste magnet button and validates magnets locally`() {
         val transport = ScriptedTransport(
             onGet = { url ->
                 when {
@@ -194,7 +194,6 @@ class SearchUiAndHandoffTest {
         }
         val indexerRepo = IndexerAggregatorRepository(transport = transport, ioDispatcher = Dispatchers.Default)
         val vm = SearchViewModel(indexerRepo, cloud)
-        val gateway = FakeHandoffGateway(clipboard = "not a magnet link")
 
         composeRule.setContent {
             MagnetVaultTheme(appearanceMode = AppAppearanceMode.OBSIDIAN) {
@@ -202,7 +201,7 @@ class SearchUiAndHandoffTest {
                     viewModel = vm,
                     websiteOpenMode = WebsiteOpenMode.IN_APP,
                     torrentBoxOpenMode = WebsiteOpenMode.IN_APP,
-                    onReadClipboard = { gateway.readClipboardText() },
+                    onReadClipboard = { "" },
                     onOpenSettings = {},
                     onOpenLocalClient = { _, _ -> },
                     onCopyMagnet = { _, _ -> },
@@ -216,21 +215,23 @@ class SearchUiAndHandoffTest {
         }
 
         composeRule.waitForIdle()
-        // Opening Search must NOT auto-fetch trending
+        // Opening Search must NOT auto-fetch trending and Paste Magnet button is removed
         assertEquals(0, transport.getCalls.get())
         assertEquals(0, transport.postCalls.get())
+        assertTrue(composeRule.onAllNodesWithTag("paste_magnet_button").fetchSemanticsNodes().isEmpty())
+        composeRule.onNodeWithTag("open_filters_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("source_dropdown_button").assertIsDisplayed()
         composeRule.onNodeWithTag("search_home_idle_card").assertIsDisplayed()
 
-        // Invalid paste magnet shows clear error and NEVER submits search automatically
-        composeRule.onNodeWithTag("paste_magnet_button").performClick()
+        // Invalid magnet input shows clear error and NEVER submits search automatically
+        composeRule.runOnUiThread { vm.handlePasteMagnet("not a magnet link") }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("paste_magnet_error_card").assertIsDisplayed()
         assertFalse(vm.uiState.value.hasSearched)
         assertEquals(0, transport.getCalls.get())
 
-        // Valid paste magnet opens shared action sheet locally with zero network calls
-        gateway.clipboard = validMagnet
-        composeRule.onNodeWithTag("paste_magnet_button").performClick()
+        // Valid magnet input opens shared action sheet locally with zero network calls
+        composeRule.runOnUiThread { vm.handlePasteMagnet(validMagnet) }
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("magnet_action_sheet_content").assertIsDisplayed()
         composeRule.onNodeWithTag("action_open_with_button").assertIsEnabled()
@@ -246,6 +247,91 @@ class SearchUiAndHandoffTest {
             composeRule.onAllNodesWithText("Trending Linux 1080p").fetchSemanticsNodes().isNotEmpty()
         }
         assertTrue(transport.getCalls.get() >= 1)
+    }
+
+    @Test
+    fun `source dropdown filters single source without requery and compact failed source opens diagnostics`() {
+        val transport = ScriptedTransport(
+            onGet = { url ->
+                when {
+                    url.contains("apibay") -> """[{"id":"1","name":"TPB Ubuntu ISO","info_hash":"1111111111111111111111111111111111111111","seeders":"300","leechers":"10","size":"1073741824","added":"1700000100","category":"201"}]"""
+                    url.contains("yts") -> throw HttpStatusException(503, "yts.mx")
+                    else -> throw HttpStatusException(404, "unused")
+                }
+            }
+        )
+        val (_, cloud) = createLocalRepo()
+        runBlocking {
+            IndexerSource.entries.forEach { src ->
+                val enabled = src == IndexerSource.TPB || src == IndexerSource.YTS
+                cloud.saveMirrorConfig(MirrorConfig(src, enabled = enabled)).getOrThrow()
+            }
+        }
+        val indexerRepo = IndexerAggregatorRepository(
+            transport = transport,
+            limits = SearchNetworkLimits(fastFailoverAttemptTimeoutMs = 2_000L),
+            ioDispatcher = Dispatchers.Default
+        )
+        val vm = SearchViewModel(indexerRepo, cloud)
+
+        composeRule.setContent {
+            MagnetVaultTheme(appearanceMode = AppAppearanceMode.OBSIDIAN) {
+                SearchScreen(
+                    viewModel = vm,
+                    websiteOpenMode = WebsiteOpenMode.IN_APP,
+                    torrentBoxOpenMode = WebsiteOpenMode.IN_APP,
+                    onReadClipboard = { "" },
+                    onOpenSettings = {},
+                    onOpenLocalClient = { _, _ -> },
+                    onCopyMagnet = { _, _ -> },
+                    onOpenSeedr = { _, _ -> },
+                    onOpenTorBox = { _, _ -> },
+                    onShareMagnet = { _, _ -> },
+                    onOpenSourcePage = {},
+                    onShowMessage = {}
+                )
+            }
+        }
+
+        waitUntilWithMainLooper {
+            vm.mirrorConfigs.value[IndexerSource.TPB]?.enabled == true &&
+                vm.mirrorConfigs.value[IndexerSource.YTS]?.enabled == true
+        }
+
+        composeRule.onNodeWithTag("search_query_input").performTextInput("ubuntu")
+        composeRule.onNodeWithTag("search_submit_button").performClick()
+        waitUntilWithMainLooper {
+            vm.uiState.value.contentPhase == SearchContentPhase.PARTIAL_SUCCESS &&
+                composeRule.onAllNodesWithTag("compact_failed_sources_entry").fetchSemanticsNodes().isNotEmpty()
+        }
+        val callsAfterSearch = transport.getCalls.get()
+
+        // No provider status card strip clutter
+        assertTrue(composeRule.onAllNodesWithTag("provider_status_TPB").fetchSemanticsNodes().isEmpty())
+
+        // Tap compact failed-source banner -> opens SourceDiagnosticsSheet
+        composeRule.onNodeWithTag("compact_failed_sources_entry").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("sources_diagnostics_sheet").assertIsDisplayed()
+        composeRule.onNodeWithText("Mirrors").performClick()
+        composeRule.waitForIdle()
+
+        // Select a single source from the right-aligned source dropdown -> filters locally without extra network calls
+        composeRule.onNodeWithTag("source_dropdown_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("source_dropdown_YTS").performClick()
+        composeRule.waitForIdle()
+        assertEquals(setOf(IndexerSource.YTS), vm.uiState.value.filters.selectedSources)
+        assertEquals(SearchContentPhase.FILTERED_OUT, vm.uiState.value.contentPhase)
+        assertEquals(callsAfterSearch, transport.getCalls.get())
+
+        composeRule.onNodeWithTag("source_dropdown_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("source_dropdown_TPB").performClick()
+        composeRule.waitForIdle()
+        assertEquals(setOf(IndexerSource.TPB), vm.uiState.value.filters.selectedSources)
+        assertEquals(1, vm.displayedGroups.value.size)
+        assertEquals(callsAfterSearch, transport.getCalls.get())
     }
 
     @Test

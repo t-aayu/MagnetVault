@@ -24,8 +24,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.CloudOff
@@ -43,14 +46,12 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
@@ -70,6 +71,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -134,6 +136,7 @@ fun VaultScreen(
     var showManageCollections by rememberSaveable { mutableStateOf(false) }
     var assignTargetLocalId by rememberSaveable { mutableStateOf<String?>(null) }
     var showClearHistoryConfirm by rememberSaveable { mutableStateOf(false) }
+    var showSortMenu by rememberSaveable { mutableStateOf(false) }
     var exportPreviewCounts by remember { mutableStateOf<ExportPreviewCounts?>(null) }
     var pendingExportSelection by remember { mutableStateOf(ExportSelection()) }
     var malformedNoticeDismissed by rememberSaveable { mutableStateOf(false) }
@@ -187,21 +190,20 @@ fun VaultScreen(
             .background(MaterialTheme.colorScheme.background)
             .ambientGlassBackdrop(telemetry)
     ) {
-        // Header + Sync status pill + Collections / Export JSON actions
+        // Compact Header + Sync status + Collections / Export JSON actions
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 8.dp),
+                .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = stringResource(R.string.nav_vault),
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.onBackground
                 )
-                Spacer(modifier = Modifier.height(2.dp))
                 val (statusIcon, statusText, statusTint) = when (val st = syncStatus) {
                     SyncSessionStatus.LocalOnly -> Triple(
                         Icons.Outlined.PhoneAndroid,
@@ -238,8 +240,8 @@ fun VaultScreen(
                         }
                         .testTag("vault_sync_status_indicator")
                 ) {
-                    Icon(statusIcon, contentDescription = null, tint = statusTint, modifier = Modifier.size(13.dp))
-                    Spacer(modifier = Modifier.width(5.dp))
+                    Icon(statusIcon, contentDescription = null, tint = statusTint, modifier = Modifier.size(12.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
                     Text(
                         text = statusText,
                         style = MaterialTheme.typography.labelSmall,
@@ -254,13 +256,14 @@ fun VaultScreen(
                 IconButton(
                     onClick = { showManageCollections = true },
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(40.dp)
                         .testTag("vault_manage_collections_button")
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.CreateNewFolder,
                         contentDescription = stringResource(R.string.vault_collections),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
                 IconButton(
@@ -270,13 +273,14 @@ fun VaultScreen(
                         }
                     },
                     modifier = Modifier
-                        .size(48.dp)
+                        .size(40.dp)
                         .testTag("vault_export_json_button")
                 ) {
                     Icon(
                         imageVector = Icons.Outlined.Download,
                         contentDescription = stringResource(R.string.vault_export_json),
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
@@ -355,7 +359,8 @@ fun VaultScreen(
         SingleChoiceSegmentedButtonRow(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp)
+                .height(38.dp)
+                .padding(horizontal = 12.dp)
         ) {
             listOf(
                 stringResource(R.string.vault_tab_saved),
@@ -368,118 +373,225 @@ fun VaultScreen(
                     shape = SegmentedButtonDefaults.itemShape(index = idx, count = 2),
                     modifier = Modifier.testTag("vault_tab_$idx")
                 ) {
-                    Text(label, style = MaterialTheme.typography.labelLarge)
+                    Text(label, style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         if (selectedTab == 0) {
             // SAVED TAB
             Column(modifier = Modifier.fillMaxSize()) {
-                // Search within Saved Vault
-                OutlinedTextField(
-                    value = filterState.query,
-                    onValueChange = viewModel::updateSavedQuery,
-                    placeholder = { Text("Filter saved releases or hash…", style = MaterialTheme.typography.bodyMedium) },
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    trailingIcon = {
-                        if (filterState.query.isNotEmpty()) {
-                            IconButton(
-                                onClick = { viewModel.updateSavedQuery("") },
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(Icons.Filled.Close, contentDescription = "Clear filter", modifier = Modifier.size(17.dp))
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = telemetry.glassSurfaceElevated,
-                        unfocusedContainerColor = telemetry.glassSurface,
-                        focusedBorderColor = MaterialTheme.colorScheme.primary,
-                        unfocusedBorderColor = telemetry.cardBorder
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .testTag("vault_saved_search_input")
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                // Sort chips
+                // Combined compact Search + Sort row
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    VaultSortOption.entries.forEach { option ->
-                        val selected = filterState.sortOption == option
-                        FilterChip(
-                            selected = selected,
-                            onClick = { viewModel.selectSortOption(option) },
-                            label = { Text(option.label, style = MaterialTheme.typography.labelMedium) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            ),
+                    Surface(
+                        color = telemetry.glassSurface,
+                        shape = RoundedCornerShape(10.dp),
+                        border = BorderStroke(1.dp, telemetry.cardBorder),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(38.dp)
+                    ) {
+                        Row(
                             modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("vault_sort_${option.name}")
-                        )
+                                .fillMaxSize()
+                                .padding(start = 10.dp, end = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                if (filterState.query.isEmpty()) {
+                                    Text(
+                                        text = "Filter saved…",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                BasicTextField(
+                                    value = filterState.query,
+                                    onValueChange = viewModel::updateSavedQuery,
+                                    singleLine = true,
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("vault_saved_search_input")
+                                )
+                            }
+                            if (filterState.query.isNotEmpty()) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { viewModel.updateSavedQuery("") }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.Close,
+                                        contentDescription = "Clear filter",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    Box {
+                        Surface(
+                            color = telemetry.glassSurface,
+                            shape = RoundedCornerShape(10.dp),
+                            border = BorderStroke(0.75.dp, telemetry.cardBorder),
+                            modifier = Modifier
+                                .height(38.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .clickable { showSortMenu = true }
+                                .testTag("vault_sort_dropdown_button")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(start = 10.dp, end = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = filterState.sortOption.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1
+                                )
+                                Icon(
+                                    imageVector = Icons.Filled.ArrowDropDown,
+                                    contentDescription = "Sort saved releases",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = showSortMenu,
+                            onDismissRequest = { showSortMenu = false },
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ) {
+                            VaultSortOption.entries.forEach { option ->
+                                val selected = filterState.sortOption == option
+                                DropdownMenuItem(
+                                    text = { Text(option.label, style = MaterialTheme.typography.bodyMedium) },
+                                    trailingIcon = if (selected) {
+                                        {
+                                            Icon(
+                                                imageVector = Icons.Filled.Check,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    } else null,
+                                    onClick = {
+                                        viewModel.selectSortOption(option)
+                                        showSortMenu = false
+                                    },
+                                    modifier = Modifier.testTag("vault_sort_${option.name}")
+                                )
+                            }
+                        }
                     }
                 }
 
-                // Local-only Collections filter bar
+                // Compact Collections strip (30dp pills)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(horizontal = 12.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    FilterChip(
-                        selected = filterState.selectedCollectionId == null,
-                        onClick = { viewModel.selectCollectionFilter(null) },
-                        label = { Text("All Saved") },
+                    val allSelected = filterState.selectedCollectionId == null
+                    Surface(
+                        color = if (allSelected) MaterialTheme.colorScheme.primaryContainer else telemetry.glassSurface,
+                        shape = RoundedCornerShape(8.dp),
+                        border = BorderStroke(
+                            0.75.dp,
+                            if (allSelected) MaterialTheme.colorScheme.primary else telemetry.cardBorder
+                        ),
                         modifier = Modifier
-                            .heightIn(min = 48.dp)
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { viewModel.selectCollectionFilter(null) }
                             .testTag("vault_collection_chip_all")
-                    )
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+                            Text(
+                                text = "All Saved",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (allSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
                     collections.forEach { col ->
                         val selected = filterState.selectedCollectionId == col.collectionId
-                        FilterChip(
-                            selected = selected,
-                            onClick = { viewModel.selectCollectionFilter(col.collectionId) },
-                            label = { Text("${col.name} (${col.bookmarkCount})") },
+                        Surface(
+                            color = if (selected) MaterialTheme.colorScheme.primaryContainer else telemetry.glassSurface,
+                            shape = RoundedCornerShape(8.dp),
+                            border = BorderStroke(
+                                0.75.dp,
+                                if (selected) MaterialTheme.colorScheme.primary else telemetry.cardBorder
+                            ),
                             modifier = Modifier
-                                .heightIn(min = 48.dp)
+                                .height(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { viewModel.selectCollectionFilter(col.collectionId) }
                                 .testTag("vault_collection_chip_${col.collectionId}")
-                        )
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 10.dp)) {
+                                Text(
+                                    text = "${col.name} (${col.bookmarkCount})",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
                     }
                     Surface(
                         color = telemetry.glassSurface,
                         shape = RoundedCornerShape(8.dp),
                         border = BorderStroke(0.75.dp, telemetry.cardBorder),
-                        modifier = Modifier.testTag("collections_local_only_badge")
+                        modifier = Modifier
+                            .height(28.dp)
+                            .testTag("collections_local_only_badge")
                     ) {
-                        Text(
-                            text = "Collections: local-only",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 8.dp)) {
+                            Text(
+                                text = "Collections: local-only",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(4.dp))
 
                 when (val bmState = bookmarksState) {
                     is UiState.Loading -> {
@@ -508,8 +620,8 @@ fun VaultScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .testTag("vault_saved_list"),
-                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
                                 items(filteredBookmarks, key = { it.bookmark.localId }) { item ->
                                     SavedBookmarkRow(
@@ -528,15 +640,15 @@ fun VaultScreen(
             // HISTORY TAB
             Column(modifier = Modifier.fillMaxSize()) {
                 GlassCard(
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(12.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
+                        .padding(horizontal = 12.dp)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
@@ -549,7 +661,7 @@ fun VaultScreen(
                                 text = if (!searchHistoryEnabled) {
                                     "Paused — existing entries remain available"
                                 } else {
-                                    "Submitted searches are saved automatically"
+                                    "Submitted searches saved"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -565,20 +677,21 @@ fun VaultScreen(
                             Spacer(modifier = Modifier.width(6.dp))
                             OutlinedButton(
                                 onClick = { showClearHistoryConfirm = true },
-                                shape = RoundedCornerShape(10.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                                 modifier = Modifier
-                                    .heightIn(min = 48.dp)
+                                    .height(36.dp)
                                     .testTag("clear_history_button")
                             ) {
-                                Icon(Icons.Outlined.DeleteSweep, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Outlined.DeleteSweep, contentDescription = null, modifier = Modifier.size(15.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Clear All")
+                                Text("Clear All", style = MaterialTheme.typography.labelMedium)
                             }
                         }
                     }
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 when (val histState = historyState) {
                     is UiState.Loading -> {
@@ -601,30 +714,30 @@ fun VaultScreen(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .testTag("vault_history_list"),
-                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, bottom = 16.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
                                 items(histState.data, key = { it.id }) { entry ->
                                     val cat = TorrentCategory.fromNameSafe(entry.category)
                                     GlassCard(
-                                        shape = RoundedCornerShape(14.dp),
+                                        shape = RoundedCornerShape(12.dp),
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(14.dp))
+                                            .clip(RoundedCornerShape(12.dp))
                                             .clickable { onReplaySearch(entry.query, cat) }
                                             .testTag("history_entry_${entry.id}")
                                     ) {
                                         Row(
-                                            modifier = Modifier.padding(start = 14.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+                                            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Outlined.Search,
                                                 contentDescription = null,
                                                 tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(18.dp)
+                                                modifier = Modifier.size(17.dp)
                                             )
-                                            Spacer(modifier = Modifier.width(12.dp))
+                                            Spacer(modifier = Modifier.width(10.dp))
                                             Column(modifier = Modifier.weight(1f)) {
                                                 Text(
                                                     text = entry.query,
@@ -640,7 +753,7 @@ fun VaultScreen(
                                             IconButton(
                                                 onClick = { viewModel.deleteHistoryEntry(entry.id) },
                                                 modifier = Modifier
-                                                    .size(48.dp)
+                                                    .size(40.dp)
                                                     .testTag("history_delete_${entry.id}")
                                             ) {
                                                 Icon(
@@ -790,12 +903,12 @@ private fun SavedBookmarkRow(
 
     Surface(
         color = telemetry.glassSurface,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         border = BorderStroke(1.dp, telemetry.cardBorder),
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 76.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .heightIn(min = 60.dp)
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onOpen)
             .semantics(mergeDescendants = false) {}
             .testTag("vault_bookmark_card_${b.localId}")
@@ -803,19 +916,19 @@ private fun SavedBookmarkRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                .padding(start = 12.dp, end = 2.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = b.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurface,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

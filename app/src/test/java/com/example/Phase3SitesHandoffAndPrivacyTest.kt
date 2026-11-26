@@ -377,11 +377,22 @@ class Phase3SitesHandoffAndPrivacyTest {
             composeRule.onAllNodesWithText("Edited Mirror").fetchSemanticsNodes().isNotEmpty()
         }
 
-        // Open site -> switches to active browser chrome showing hostname badge
+        // Open site -> switches to active browser chrome showing single compact address bar with hostname badge
         composeRule.onNodeWithTag("site_chip_${addedSite.id}").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("browser_hostname_badge").assertIsDisplayed()
         composeRule.onNodeWithText("mirror.example.org").assertIsDisplayed()
+        // Tapping hostname badge reveals inline URL editor and more button exposes external/shield/discard actions
+        composeRule.onNodeWithTag("browser_hostname_badge").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("browser_url_input").assertIsDisplayed()
+        composeRule.onNodeWithTag("browser_more_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("browser_open_external_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("browser_shield_toggle").assertIsDisplayed()
+        composeRule.onNodeWithTag("browser_discard_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("browser_shield_toggle").performClick()
+        composeRule.waitForIdle()
 
         // Capture a magnet:? link -> opens shared MagnetActionModalSheet
         composeRule.runOnUiThread {

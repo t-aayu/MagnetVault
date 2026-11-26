@@ -554,6 +554,16 @@ class SearchViewModel(
         applyFilters(_localState.value.filters.copy(selectedSources = updatedSet))
     }
 
+    fun selectSingleSourceFilter(source: IndexerSource?) {
+        val current = _localState.value.filters.selectedSources
+        val updatedSet = when {
+            source == null -> emptySet()
+            current.size == 1 && source in current -> emptySet()
+            else -> setOf(source)
+        }
+        applyFilters(_localState.value.filters.copy(selectedSources = updatedSet))
+    }
+
     fun applyFilters(newFilters: SearchFilterState) {
         val previous = _localState.value.filters
         persistFilters(newFilters)

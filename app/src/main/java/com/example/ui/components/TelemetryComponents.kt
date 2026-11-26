@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
@@ -210,12 +211,12 @@ fun ReleaseGroupRow(
 
     Surface(
         color = containerColor,
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(12.dp),
         border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, borderColor),
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 72.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .heightIn(min = 60.dp)
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick)
             .semantics(mergeDescendants = false) {
                 contentDescription = accessibilitySummary
@@ -225,7 +226,7 @@ fun ReleaseGroupRow(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 4.dp, top = 11.dp, bottom = 11.dp),
+                .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -237,7 +238,7 @@ fun ReleaseGroupRow(
                     overflow = TextOverflow.Ellipsis
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 // Metrics line: Seeders | Size | Age | Source (+N)
                 Row(
@@ -303,7 +304,7 @@ fun ReleaseGroupRow(
                 }
 
                 if (group.qualityTags.isNotEmpty() || group.swarmHealth == SwarmHealth.DEAD || group.knownLeechers != null) {
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -913,6 +914,68 @@ fun SearchStatusMessageCard(
 }
 
 @Composable
+fun CompactFailedSourcesBanner(
+    failedStatuses: List<IndexerSearchStatus>,
+    onOpenDiagnostics: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val telemetry = LocalTelemetryColors.current
+    if (failedStatuses.isEmpty()) return
+    val failedNames = failedStatuses.joinToString(", ") { it.source.shortBadge }
+    Surface(
+        color = telemetry.deadRoseContainer.copy(alpha = 0.55f),
+        shape = RoundedCornerShape(10.dp),
+        border = BorderStroke(0.75.dp, telemetry.deadRose.copy(alpha = 0.45f)),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 3.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onOpenDiagnostics)
+            .testTag("compact_failed_sources_entry")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Filled.ErrorOutline,
+                contentDescription = "Failed sources details",
+                tint = telemetry.deadRose,
+                modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "${failedStatuses.size} failed: $failedNames",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "Details",
+                style = MaterialTheme.typography.labelSmall,
+                color = telemetry.deadRose,
+                fontWeight = FontWeight.SemiBold
+            )
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = telemetry.deadRose,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Retained for backward compatibility if referenced externally.
+ */
+@Composable
 fun IndexerErrorFallbackBanner(
     failedStatuses: List<IndexerSearchStatus>,
     openMode: WebsiteOpenMode,
@@ -921,86 +984,11 @@ fun IndexerErrorFallbackBanner(
     onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val telemetry = LocalTelemetryColors.current
-    if (failedStatuses.isEmpty()) return
-    GlassCard(
-        shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, telemetry.deadRose.copy(alpha = 0.45f)),
+    CompactFailedSourcesBanner(
+        failedStatuses = failedStatuses,
+        onOpenDiagnostics = onOpenDiagnostics,
         modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp)
-            .testTag("indexer_error_fallback_banner")
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.ErrorOutline,
-                    contentDescription = "Source failure",
-                    tint = telemetry.deadRose,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "${failedStatuses.size} source${if (failedStatuses.size == 1) "" else "s"} failed — retry or open HTML (${openMode.label})",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(
-                    onClick = onOpenDiagnostics,
-                    modifier = Modifier.heightIn(min = 48.dp)
-                ) {
-                    Text("Details")
-                }
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                failedStatuses.forEach { st ->
-                    OutlinedButton(
-                        onClick = { onRetrySource(st.source) },
-                        enabled = !st.isLoading && !st.isRetrying,
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier
-                            .heightIn(min = 48.dp)
-                            .testTag("banner_retry_${st.source.name}")
-                    ) {
-                        Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(modifier = Modifier.width(5.dp))
-                        Text("Retry ${st.source.shortBadge}")
-                    }
-                    if (st.webSearchUrl.isNotBlank()) {
-                        OutlinedButton(
-                            onClick = { onOpenSite(st) },
-                            shape = RoundedCornerShape(10.dp),
-                            modifier = Modifier
-                                .heightIn(min = 48.dp)
-                                .testTag("open_failed_site_${st.source.name}")
-                        ) {
-                            Icon(
-                                imageVector = if (openMode == WebsiteOpenMode.IN_APP) {
-                                    Icons.Outlined.Public
-                                } else {
-                                    Icons.AutoMirrored.Filled.OpenInNew
-                                },
-                                contentDescription = null,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(5.dp))
-                            Text(st.source.shortBadge)
-                        }
-                    }
-                }
-            }
-        }
-    }
+    )
 }
 
 /**

@@ -26,11 +26,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Refresh
@@ -45,16 +47,16 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.InputChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -62,30 +64,31 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.model.CanonicalReleaseGroup
+import com.example.model.IndexerSource
 import com.example.model.ProviderListing
+import com.example.model.ProviderTerminalState
 import com.example.model.SearchContentPhase
-import com.example.model.SortOption
 import com.example.model.TorrentCategory
 import com.example.model.WebsiteOpenMode
-import com.example.ui.components.IndexerErrorFallbackBanner
-import com.example.ui.components.ProviderStatusStrip
+import com.example.ui.components.CompactFailedSourcesBanner
 import com.example.ui.components.ReleaseGroupRow
 import com.example.ui.components.SearchFilterSortSheet
 import com.example.ui.components.SearchStatusMessageCard
@@ -128,6 +131,7 @@ fun SearchScreen(
 
     var showFilterSheet by rememberSaveable { mutableStateOf(false) }
     var showSourcesSheet by rememberSaveable { mutableStateOf(false) }
+    var showSourceMenu by rememberSaveable { mutableStateOf(false) }
     var showPasteEditDialog by rememberSaveable { mutableStateOf(false) }
     var manualPasteDraft by rememberSaveable { mutableStateOf("") }
 
@@ -163,7 +167,7 @@ fun SearchScreen(
                     .weight(1f)
                     .fillMaxHeight()
             ) {
-                // Subtle translucent Search Header (query input + Paste Magnet action)
+                // Compact translucent Search Header (slim search input + left Filters + right Source dropdown)
                 Surface(
                     color = telemetry.chromeTranslucent,
                     tonalElevation = 0.dp,
@@ -172,234 +176,369 @@ fun SearchScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                     ) {
-                        OutlinedTextField(
-                            value = state.query,
-                            onValueChange = viewModel::updateQuery,
-                            placeholder = {
-                                Text(
-                                    text = stringResource(R.string.search_placeholder),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.Outlined.Search,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            },
-                            trailingIcon = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    if (state.query.isNotEmpty() || state.hasSearched) {
-                                        IconButton(
-                                            onClick = { viewModel.clearSearch() },
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Surface(
+                                color = telemetry.glassSurface,
+                                shape = RoundedCornerShape(12.dp),
+                                border = BorderStroke(1.dp, telemetry.cardBorder),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(42.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(start = 10.dp, end = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Search,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(17.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Box(
+                                        modifier = Modifier.weight(1f),
+                                        contentAlignment = Alignment.CenterStart
+                                    ) {
+                                        if (state.query.isEmpty()) {
+                                            Text(
+                                                text = stringResource(R.string.search_placeholder),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                        BasicTextField(
+                                            value = state.query,
+                                            onValueChange = viewModel::updateQuery,
+                                            singleLine = true,
+                                            textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                                color = MaterialTheme.colorScheme.onSurface
+                                            ),
+                                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                            keyboardActions = KeyboardActions(
+                                                onSearch = {
+                                                    focusManager.clearFocus()
+                                                    viewModel.executeSearch()
+                                                }
+                                            ),
                                             modifier = Modifier
-                                                .size(48.dp)
+                                                .fillMaxWidth()
+                                                .testTag("search_query_input")
+                                        )
+                                    }
+                                    if (state.query.isNotEmpty() || state.hasSearched) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { viewModel.clearSearch() }
                                                 .testTag("search_clear_button")
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Filled.Close,
                                                 contentDescription = "Clear search",
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(19.dp)
+                                                modifier = Modifier.size(16.dp)
                                             )
                                         }
                                     }
-                                    Button(
-                                        onClick = {
-                                            focusManager.clearFocus()
-                                            viewModel.executeSearch()
-                                        },
-                                        shape = RoundedCornerShape(10.dp),
-                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = MaterialTheme.colorScheme.primary,
-                                            contentColor = MaterialTheme.colorScheme.onPrimary
-                                        ),
-                                        modifier = Modifier
-                                            .padding(end = 6.dp)
-                                            .heightIn(min = 48.dp)
-                                            .testTag("search_submit_button")
-                                    ) {
-                                        Text(
-                                            text = "Go",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
                                 }
-                            },
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                            keyboardActions = KeyboardActions(
-                                onSearch = {
-                                    focusManager.clearFocus()
-                                    viewModel.executeSearch()
-                                }
-                            ),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = telemetry.glassSurfaceElevated,
-                                unfocusedContainerColor = telemetry.glassSurface,
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = telemetry.cardBorder,
-                                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
-                                cursorColor = MaterialTheme.colorScheme.primary
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("search_query_input")
-                        )
+                            }
 
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        // Visible Paste Magnet action + Filter/Sources quick bar
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            FilledTonalButton(
+                            Button(
                                 onClick = {
                                     focusManager.clearFocus()
-                                    val clipText = onReadClipboard()
-                                    viewModel.handlePasteMagnet(clipText)
+                                    viewModel.executeSearch()
                                 },
                                 shape = RoundedCornerShape(10.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary
                                 ),
                                 modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("paste_magnet_button")
+                                    .height(42.dp)
+                                    .testTag("search_submit_button")
                             ) {
-                                Icon(
-                                    imageVector = Icons.Filled.ContentPaste,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
-                                    text = stringResource(R.string.action_paste_magnet),
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-
-                            OutlinedButton(
-                                onClick = { showFilterSheet = true },
-                                shape = RoundedCornerShape(10.dp),
-                                border = BorderStroke(
-                                    1.dp,
-                                    if (state.filters.hasNonDefaultFilters) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        telemetry.cardBorder
-                                    }
-                                ),
-                                modifier = Modifier
-                                    .heightIn(min = 48.dp)
-                                    .testTag("open_filters_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.FilterList,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (state.filters.activeFilterCount > 0) {
-                                        "${stringResource(R.string.action_filters)} (${state.filters.activeFilterCount})"
-                                    } else {
-                                        stringResource(R.string.action_filters)
-                                    },
-                                    style = MaterialTheme.typography.labelLarge
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.weight(1f))
-
-                            if (state.hasSearched) {
-                                Text(
-                                    text = "${state.completedSourcesCount}/${state.enabledSourcesCount}",
-                                    style = TelemetryMonoStyle.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { showSourcesSheet = true }
-                                        .padding(horizontal = 8.dp, vertical = 10.dp)
-                                        .testTag("sources_progress_counter")
+                                    text = "Go",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                             }
                         }
 
-                        // Active filter chips + Reset
-                        if (state.filters.hasNonDefaultFilters) {
-                            Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // Compact single row: Filters (left) + Source dropdown (right)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                             ) {
-                                if (state.filters.category != TorrentCategory.ALL) {
-                                    InputChip(
-                                        selected = true,
-                                        onClick = { viewModel.selectCategory(TorrentCategory.ALL) },
-                                        label = { Text(state.filters.category.label) },
-                                        trailingIcon = {
-                                            Icon(Icons.Filled.Close, contentDescription = "Remove category filter", modifier = Modifier.size(14.dp))
-                                        },
-                                        modifier = Modifier.testTag("active_chip_category")
-                                    )
-                                }
-                                if (state.filters.sort != SortOption.SEEDERS) {
-                                    InputChip(
-                                        selected = true,
-                                        onClick = { viewModel.selectSort(SortOption.SEEDERS) },
-                                        label = { Text("Sort: ${state.filters.sort.label}") },
-                                        trailingIcon = {
-                                            Icon(Icons.Filled.Close, contentDescription = "Reset sort", modifier = Modifier.size(14.dp))
-                                        },
-                                        modifier = Modifier.testTag("active_chip_sort")
-                                    )
-                                }
-                                state.filters.qualities.forEach { tag ->
-                                    InputChip(
-                                        selected = true,
-                                        onClick = { viewModel.toggleQualityTag(tag) },
-                                        label = { Text(tag.label) },
-                                        trailingIcon = {
-                                            Icon(Icons.Filled.Close, contentDescription = "Remove ${tag.label}", modifier = Modifier.size(14.dp))
-                                        },
-                                        modifier = Modifier.testTag("active_chip_quality_${tag.name}")
-                                    )
-                                }
-                                state.filters.selectedSources.forEach { src ->
-                                    InputChip(
-                                        selected = true,
-                                        onClick = { viewModel.toggleSourceFilter(src) },
-                                        label = { Text(src.shortBadge) },
-                                        trailingIcon = {
-                                            Icon(Icons.Filled.Close, contentDescription = "Remove ${src.displayName}", modifier = Modifier.size(14.dp))
-                                        },
-                                        modifier = Modifier.testTag("active_chip_source_${src.name}")
-                                    )
-                                }
-                                TextButton(
-                                    onClick = { viewModel.resetFilters() },
+                                Surface(
+                                    color = if (state.filters.hasNonDefaultFilters) {
+                                        MaterialTheme.colorScheme.primaryContainer
+                                    } else {
+                                        telemetry.glassSurface
+                                    },
+                                    shape = RoundedCornerShape(9.dp),
+                                    border = BorderStroke(
+                                        0.75.dp,
+                                        if (state.filters.hasNonDefaultFilters) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            telemetry.cardBorder
+                                        }
+                                    ),
                                     modifier = Modifier
-                                        .heightIn(min = 48.dp)
-                                        .testTag("active_filters_reset_button")
+                                        .height(34.dp)
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .clickable { showFilterSheet = true }
+                                        .testTag("open_filters_button")
                                 ) {
-                                    Text(stringResource(R.string.action_reset))
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.FilterList,
+                                            contentDescription = null,
+                                            tint = if (state.filters.hasNonDefaultFilters) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = if (state.filters.activeFilterCount > 0) {
+                                                "${stringResource(R.string.action_filters)} (${state.filters.activeFilterCount})"
+                                            } else {
+                                                stringResource(R.string.action_filters)
+                                            },
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = if (state.filters.hasNonDefaultFilters) {
+                                                MaterialTheme.colorScheme.onPrimaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            },
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+
+                                if (state.filters.hasNonDefaultFilters) {
+                                    Surface(
+                                        color = telemetry.glassSurface,
+                                        shape = RoundedCornerShape(9.dp),
+                                        border = BorderStroke(0.75.dp, telemetry.cardBorder),
+                                        modifier = Modifier
+                                            .height(34.dp)
+                                            .clip(RoundedCornerShape(9.dp))
+                                            .clickable { viewModel.resetFilters() }
+                                            .testTag("active_filters_reset_button")
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Close,
+                                                contentDescription = "Reset filters",
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                            Text(
+                                                text = stringResource(R.string.action_reset),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Right: Single Source selector dropdown
+                            Box {
+                                val selectedSources = state.filters.selectedSources
+                                val sourceButtonLabel = buildString {
+                                    when {
+                                        selectedSources.size == 1 -> append(selectedSources.first().shortBadge)
+                                        selectedSources.size > 1 -> append("${selectedSources.size} sources")
+                                        else -> append("All sources")
+                                    }
+                                    if (state.hasSearched && state.enabledSourcesCount > 0) {
+                                        append(" (${state.completedSourcesCount}/${state.enabledSourcesCount})")
+                                    }
+                                }
+                                Surface(
+                                    color = if (selectedSources.isNotEmpty()) {
+                                        MaterialTheme.colorScheme.tertiaryContainer
+                                    } else {
+                                        telemetry.glassSurface
+                                    },
+                                    shape = RoundedCornerShape(9.dp),
+                                    border = BorderStroke(
+                                        0.75.dp,
+                                        if (selectedSources.isNotEmpty()) {
+                                            MaterialTheme.colorScheme.tertiary.copy(alpha = 0.55f)
+                                        } else {
+                                            telemetry.cardBorder
+                                        }
+                                    ),
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .clickable { showSourceMenu = true }
+                                        .testTag("source_dropdown_button")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(start = 10.dp, end = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                                    ) {
+                                        Text(
+                                            text = sourceButtonLabel,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = if (selectedSources.isNotEmpty()) {
+                                                MaterialTheme.colorScheme.onTertiaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurface
+                                            },
+                                            fontWeight = FontWeight.Medium,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Filled.ArrowDropDown,
+                                            contentDescription = "Select source",
+                                            tint = if (selectedSources.isNotEmpty()) {
+                                                MaterialTheme.colorScheme.onTertiaryContainer
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            },
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                DropdownMenu(
+                                    expanded = showSourceMenu,
+                                    onDismissRequest = { showSourceMenu = false },
+                                    containerColor = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.testTag("source_dropdown_menu")
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("All sources", style = MaterialTheme.typography.bodyMedium) },
+                                        trailingIcon = if (selectedSources.isEmpty()) {
+                                            {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Check,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        } else null,
+                                        onClick = {
+                                            viewModel.selectSingleSourceFilter(null)
+                                            showSourceMenu = false
+                                        },
+                                        modifier = Modifier.testTag("source_dropdown_all")
+                                    )
+                                    HorizontalDivider(color = telemetry.cardBorder.copy(alpha = 0.6f))
+                                    val statusBySource = state.providerStatuses.associateBy { it.source }
+                                    IndexerSource.entries.forEach { src ->
+                                        val st = statusBySource[src]
+                                        val isCurrent = selectedSources.size == 1 && src in selectedSources
+                                        val statusLabel = if (state.hasSearched && st != null) {
+                                            when (st.terminalState) {
+                                                ProviderTerminalState.LOADING -> "…"
+                                                ProviderTerminalState.MATCHES -> st.resultCount.toString()
+                                                ProviderTerminalState.ZERO_MATCHES -> "0"
+                                                ProviderTerminalState.DISABLED -> "Off"
+                                                ProviderTerminalState.UNSUPPORTED_CATEGORY -> "N/A"
+                                                else -> "Failed"
+                                            }
+                                        } else null
+                                        val statusColor = when {
+                                            st == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                                            st.terminalState == ProviderTerminalState.MATCHES -> telemetry.seederGreen
+                                            st.terminalState.isFailure -> telemetry.deadRose
+                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                ) {
+                                                    Text(
+                                                        text = src.displayName,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        modifier = Modifier.weight(1f, fill = false)
+                                                    )
+                                                    if (statusLabel != null) {
+                                                        Text(
+                                                            text = statusLabel,
+                                                            style = TelemetryMonoStyle,
+                                                            color = statusColor
+                                                        )
+                                                    }
+                                                }
+                                            },
+                                            trailingIcon = if (isCurrent) {
+                                                {
+                                                    Icon(
+                                                        imageVector = Icons.Filled.Check,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.primary,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            } else null,
+                                            onClick = {
+                                                viewModel.selectSingleSourceFilter(src)
+                                                showSourceMenu = false
+                                            },
+                                            modifier = Modifier.testTag("source_dropdown_${src.name}")
+                                        )
+                                    }
+                                    HorizontalDivider(color = telemetry.cardBorder.copy(alpha = 0.6f))
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = "Source info & diagnostics",
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        },
+                                        onClick = {
+                                            showSourceMenu = false
+                                            showSourcesSheet = true
+                                        },
+                                        modifier = Modifier.testTag("source_dropdown_diagnostics")
+                                    )
                                 }
                             }
                         }
@@ -412,7 +551,7 @@ fun SearchScreen(
                     LinearProgressIndicator(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(2.5.dp)
+                            .height(2.dp)
                             .testTag("search_progress_bar"),
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = Color.Transparent
@@ -423,14 +562,14 @@ fun SearchScreen(
                 val pasteError = state.pasteMagnetError
                 if (pasteError != null) {
                     GlassCard(
-                        shape = RoundedCornerShape(14.dp),
+                        shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
                             .testTag("paste_magnet_error_card")
                     ) {
-                        Column(modifier = Modifier.padding(14.dp)) {
+                        Column(modifier = Modifier.padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(
                                     imageVector = Icons.Filled.ErrorOutline,
@@ -487,50 +626,12 @@ fun SearchScreen(
                     }
                 }
 
-                // Results status strip & progress summary when searching or after search
+                // Single compact tappable failed-source entry (opens SourceDiagnosticsSheet)
                 if (state.hasSearched && state.contentPhase != SearchContentPhase.ALL_SOURCES_DISABLED) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = "${state.completedSourcesCount} of ${state.enabledSourcesCount} sources completed",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.testTag("sources_progress_text")
-                        )
-                        if (groups.isNotEmpty()) {
-                            Text(
-                                text = "${groups.size} release${if (groups.size == 1) "" else "s"}",
-                                style = TelemetryMonoStyle,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    ProviderStatusStrip(
-                        statuses = state.providerStatuses,
-                        onStatusClick = { st ->
-                            val targetUrl = st.webSearchUrl.ifBlank { st.mirrorUsed }
-                            if (targetUrl.isNotBlank()) {
-                                onOpenSourcePage(targetUrl)
-                            } else {
-                                onShowMessage("No website URL available for ${st.source.displayName}")
-                            }
-                        },
-                        onOpenDiagnostics = { showSourcesSheet = true }
-                    )
-
                     val failedStatuses = state.providerStatuses.filter { it.terminalState.isFailure }
                     if (failedStatuses.isNotEmpty() && state.contentPhase != SearchContentPhase.TOTAL_FAILURE) {
-                        IndexerErrorFallbackBanner(
+                        CompactFailedSourcesBanner(
                             failedStatuses = failedStatuses,
-                            openMode = websiteOpenMode,
-                            onRetrySource = { viewModel.retryProvider(it) },
-                            onOpenSite = { st -> onOpenSourcePage(st.webSearchUrl) },
                             onOpenDiagnostics = { showSourcesSheet = true }
                         )
                     }
@@ -542,8 +643,8 @@ fun SearchScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .testTag("search_results_list"),
-                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 28.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     when (state.contentPhase) {
                         SearchContentPhase.IDLE_HOME -> {
@@ -751,7 +852,7 @@ fun SearchScreen(
                                     SearchStatusMessageCard(
                                         icon = Icons.Filled.Search,
                                         title = "Ready to search",
-                                        subtitle = "Search across ${state.enabledSourcesCount} enabled sources or paste a magnet link directly to inspect, save, or hand off.",
+                                        subtitle = "Search across ${state.enabledSourcesCount} enabled sources or filter a single source from the dropdown.",
                                         testTag = "search_home_idle_card"
                                     )
                                 }

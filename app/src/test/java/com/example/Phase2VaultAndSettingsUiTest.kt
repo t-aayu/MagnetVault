@@ -218,6 +218,12 @@ class Phase2VaultAndSettingsUiTest {
         composeRule.onNodeWithTag("export_cancel_button").performClick()
         composeRule.waitForIdle()
 
+        // Verify compact sort dropdown works
+        composeRule.onNodeWithTag("vault_sort_dropdown_button").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("vault_sort_TITLE").performClick()
+        composeRule.waitForIdle()
+
         // Tap bookmark -> opens shared MagnetActionModalSheet
         composeRule.onNodeWithTag("vault_bookmark_card_$savedId").performClick()
         composeRule.waitForIdle()
