@@ -101,6 +101,8 @@ FIRESTORE_EMULATOR_HOST=127.0.0.1:8085 node --test firestore.test.js
 
 ## Release Checklist (`v2.0.0`)
 
+See [docs/RELEASE_AND_SIGNING.md](docs/RELEASE_AND_SIGNING.md) for full keystore generation, GitHub Actions secrets, and repository settings instructions.
+
 1. Verify `versionCode` and `versionName` in `app/build.gradle.kts` and update `CHANGELOG.md`.
 2. Run `gradle :app:lintDebug`, `gradle :app:testDebugUnitTest`, and `gradle :app:assembleDebug` (both with and without `app/google-services.json`).
 3. Verify Firestore security rules against the local emulator (`firestore.test.js`).

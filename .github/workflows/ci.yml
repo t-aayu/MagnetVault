@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: |
           GRADLE_BIN=$([[ -x ./gradlew ]] && echo "./gradlew" || echo "gradle")
-          $GRADLE_BIN :app:assembleDebug :app:testDebugUnitTest --tests "com.example.Phase2LocalVaultTest"
+          $GRADLE_BIN :app:assembleDebug :app:testDebugUnitTest --tests "com.example.Phase2LocalFirstAndMigrationTest"
 
       - name: Clean up debug keystore
         if: always()
