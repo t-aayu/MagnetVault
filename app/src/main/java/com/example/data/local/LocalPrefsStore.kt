@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.model.AppAppearanceMode
 import com.example.model.BookmarkRecord
 import com.example.model.CustomDnsConfig
 import com.example.model.CustomDnsPreset
@@ -18,6 +19,7 @@ import com.example.model.TorrentResult
 import com.example.model.WebsiteOpenMode
 import com.google.firebase.Timestamp
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,9 +27,30 @@ import java.util.Locale
 
 private val Context.magnetVaultDataStore by preferencesDataStore(name = "magnetvault_local_prefs")
 
+data class SyncAccountPrefs(
+    val enrolled: Boolean = false,
+    val syncHistory: Boolean = false,
+    val syncMirrors: Boolean = false
+)
+
+data class LegacyDataStoreSnapshot(
+    val bookmarksRaw: String?,
+    val historyRaw: String?,
+    val mirrorsRaw: String?,
+    val customSitesRaw: String?
+) {
+    val hasAnyPayloads: Boolean
+        get() = !bookmarksRaw.isNullOrBlank() ||
+            !historyRaw.isNullOrBlank() ||
+            !mirrorsRaw.isNullOrBlank() ||
+            !customSitesRaw.isNullOrBlank()
+}
+
 class LocalPrefsStore(private val context: Context) {
     private object Keys {
         val DARK_THEME = booleanPreferencesKey("dark_theme")
+        val APPEARANCE_MODE = stringPreferencesKey("appearance_mode")
+        val SEARCH_HISTORY_ENABLED = booleanPreferencesKey("search_history_enabled")
         val GUEST_MODE_ENABLED = booleanPreferencesKey("guest_mode_enabled")
         val WEBSITE_OPEN_MODE = stringPreferencesKey("website_open_mode")
         val TORRENT_BOX_OPEN_MODE = stringPreferencesKey("torrent_box_open_mode")
@@ -37,10 +60,27 @@ class LocalPrefsStore(private val context: Context) {
         val LOCAL_BOOKMARKS_JSON = stringPreferencesKey("local_bookmarks_json")
         val LOCAL_HISTORY_JSON = stringPreferencesKey("local_history_json")
         val LOCAL_MIRRORS_JSON = stringPreferencesKey("local_mirrors_json")
+        val SYNC_ACCOUNT_PREFS_JSON = stringPreferencesKey("sync_account_prefs_json")
+        val ACTIVE_SYNC_UID = stringPreferencesKey("active_sync_uid")
     }
 
-    val darkThemeFlow: Flow<Boolean> = context.magnetVaultDataStore.data.map { prefs ->
-        prefs[Keys.DARK_THEME] ?: true // Dark-first default
+    val appearanceModeFlow: Flow<AppAppearanceMode> = context.magnetVaultDataStore.data.map { prefs ->
+        val rawMode = prefs[Keys.APPEARANCE_MODE]
+        when {
+            !rawMode.isNullOrBlank() -> AppAppearanceMode.fromNameSafe(rawMode)
+            prefs.contains(Keys.DARK_THEME) -> {
+                if (prefs[Keys.DARK_THEME] == true) AppAppearanceMode.OBSIDIAN else AppAppearanceMode.ALABASTER
+            }
+            else -> AppAppearanceMode.OBSIDIAN
+        }
+    }
+
+    val darkThemeFlow: Flow<Boolean> = appearanceModeFlow.map { mode ->
+        mode != AppAppearanceMode.ALABASTER
+    }
+
+    val searchHistoryEnabledFlow: Flow<Boolean> = context.magnetVaultDataStore.data.map { prefs ->
+        prefs[Keys.SEARCH_HISTORY_ENABLED] ?: true
     }
 
     val guestModeEnabledFlow: Flow<Boolean> = context.magnetVaultDataStore.data.map { prefs ->
@@ -62,12 +102,125 @@ class LocalPrefsStore(private val context: Context) {
         )
     }
 
+    val activeSyncUidFlow: Flow<String?> = context.magnetVaultDataStore.data.map { prefs ->
+        prefs[Keys.ACTIVE_SYNC_UID]?.takeIf { it.isNotBlank() }
+    }
+
+    val syncAccountPrefsMapFlow: Flow<Map<String, SyncAccountPrefs>> = context.magnetVaultDataStore.data.map { prefs ->
+        decodeSyncAccountPrefs(prefs[Keys.SYNC_ACCOUNT_PREFS_JSON])
+    }
+
+    fun observeSyncPrefsForAccount(uid: String?): Flow<SyncAccountPrefs> =
+        syncAccountPrefsMapFlow.map { map ->
+            if (uid.isNullOrBlank()) SyncAccountPrefs() else map[uid] ?: SyncAccountPrefs()
+        }
+
+    suspend fun getSyncPrefsForAccount(uid: String): SyncAccountPrefs =
+        observeSyncPrefsForAccount(uid).first()
+
+    suspend fun setActiveSyncUid(uid: String?) {
+        context.magnetVaultDataStore.edit { prefs ->
+            if (uid.isNullOrBlank()) {
+                prefs.remove(Keys.ACTIVE_SYNC_UID)
+            } else {
+                prefs[Keys.ACTIVE_SYNC_UID] = uid
+            }
+        }
+    }
+
+    suspend fun setSyncEnrollment(
+        uid: String,
+        enrolled: Boolean,
+        syncHistory: Boolean = false,
+        syncMirrors: Boolean = false
+    ) {
+        if (uid.isBlank()) return
+        context.magnetVaultDataStore.edit { prefs ->
+            val current = decodeSyncAccountPrefs(prefs[Keys.SYNC_ACCOUNT_PREFS_JSON]).toMutableMap()
+            current[uid] = SyncAccountPrefs(
+                enrolled = enrolled,
+                syncHistory = if (enrolled) syncHistory else false,
+                syncMirrors = if (enrolled) syncMirrors else false
+            )
+            prefs[Keys.SYNC_ACCOUNT_PREFS_JSON] = encodeSyncAccountPrefs(current)
+            if (enrolled) {
+                prefs[Keys.ACTIVE_SYNC_UID] = uid
+            } else if (prefs[Keys.ACTIVE_SYNC_UID] == uid) {
+                prefs.remove(Keys.ACTIVE_SYNC_UID)
+            }
+        }
+    }
+
+    suspend fun setHistorySyncOptIn(uid: String, enabled: Boolean) {
+        if (uid.isBlank()) return
+        context.magnetVaultDataStore.edit { prefs ->
+            val current = decodeSyncAccountPrefs(prefs[Keys.SYNC_ACCOUNT_PREFS_JSON]).toMutableMap()
+            val prev = current[uid] ?: SyncAccountPrefs()
+            current[uid] = prev.copy(syncHistory = enabled && prev.enrolled)
+            prefs[Keys.SYNC_ACCOUNT_PREFS_JSON] = encodeSyncAccountPrefs(current)
+        }
+    }
+
+    suspend fun setMirrorsSyncOptIn(uid: String, enabled: Boolean) {
+        if (uid.isBlank()) return
+        context.magnetVaultDataStore.edit { prefs ->
+            val current = decodeSyncAccountPrefs(prefs[Keys.SYNC_ACCOUNT_PREFS_JSON]).toMutableMap()
+            val prev = current[uid] ?: SyncAccountPrefs()
+            current[uid] = prev.copy(syncMirrors = enabled && prev.enrolled)
+            prefs[Keys.SYNC_ACCOUNT_PREFS_JSON] = encodeSyncAccountPrefs(current)
+        }
+    }
+
+    suspend fun readLegacySnapshot(): LegacyDataStoreSnapshot {
+        val prefs = context.magnetVaultDataStore.data.first()
+        return LegacyDataStoreSnapshot(
+            bookmarksRaw = prefs[Keys.LOCAL_BOOKMARKS_JSON],
+            historyRaw = prefs[Keys.LOCAL_HISTORY_JSON],
+            mirrorsRaw = prefs[Keys.LOCAL_MIRRORS_JSON],
+            customSitesRaw = prefs[Keys.CUSTOM_SITES_JSON]
+        )
+    }
+
+    internal suspend fun writeRawLegacySnapshotForTesting(
+        bookmarksRaw: String? = null,
+        historyRaw: String? = null,
+        mirrorsRaw: String? = null,
+        customSitesRaw: String? = null
+    ) {
+        context.magnetVaultDataStore.edit { prefs ->
+            if (bookmarksRaw != null) prefs[Keys.LOCAL_BOOKMARKS_JSON] = bookmarksRaw else prefs.remove(Keys.LOCAL_BOOKMARKS_JSON)
+            if (historyRaw != null) prefs[Keys.LOCAL_HISTORY_JSON] = historyRaw else prefs.remove(Keys.LOCAL_HISTORY_JSON)
+            if (mirrorsRaw != null) prefs[Keys.LOCAL_MIRRORS_JSON] = mirrorsRaw else prefs.remove(Keys.LOCAL_MIRRORS_JSON)
+            if (customSitesRaw != null) prefs[Keys.CUSTOM_SITES_JSON] = customSitesRaw else prefs.remove(Keys.CUSTOM_SITES_JSON)
+        }
+    }
+
+    internal suspend fun clearAllForTesting() {
+        context.magnetVaultDataStore.edit { it.clear() }
+    }
+
     val customSitesFlow: Flow<List<CustomSite>> = context.magnetVaultDataStore.data.map { prefs ->
         decodeCustomSites(prefs[Keys.CUSTOM_SITES_JSON])
     }
 
+    suspend fun setAppearanceMode(mode: AppAppearanceMode) {
+        context.magnetVaultDataStore.edit { prefs ->
+            prefs[Keys.APPEARANCE_MODE] = mode.name
+            if (mode != AppAppearanceMode.SYSTEM) {
+                prefs[Keys.DARK_THEME] = (mode == AppAppearanceMode.OBSIDIAN)
+            }
+        }
+    }
+
     suspend fun setDarkTheme(enabled: Boolean) {
-        context.magnetVaultDataStore.edit { it[Keys.DARK_THEME] = enabled }
+        context.magnetVaultDataStore.edit { prefs ->
+            prefs[Keys.DARK_THEME] = enabled
+            prefs[Keys.APPEARANCE_MODE] = if (enabled) AppAppearanceMode.OBSIDIAN.name else AppAppearanceMode.ALABASTER.name
+        }
+    }
+
+    suspend fun setSearchHistoryEnabled(enabled: Boolean) {
+        context.magnetVaultDataStore.edit { it[Keys.SEARCH_HISTORY_ENABLED] = enabled }
     }
 
     suspend fun setGuestModeEnabled(enabled: Boolean) {
@@ -114,10 +267,13 @@ class LocalPrefsStore(private val context: Context) {
         decodeBookmarks(prefs[Keys.LOCAL_BOOKMARKS_JSON])
     }
 
-    suspend fun addLocalBookmark(docId: String, torrent: TorrentResult) {
+    suspend fun addLocalBookmark(docId: String, torrent: TorrentResult, replaceDocId: String? = null) {
         context.magnetVaultDataStore.edit { prefs ->
             val current = decodeBookmarks(prefs[Keys.LOCAL_BOOKMARKS_JSON]).toMutableList()
-            current.removeAll { it.id == docId }
+            val preservedCreatedAt = current.firstOrNull {
+                it.id == docId || (replaceDocId != null && it.id == replaceDocId)
+            }?.createdAt ?: Timestamp.now()
+            current.removeAll { it.id == docId || (replaceDocId != null && it.id == replaceDocId) }
             val nowTs = Timestamp.now()
             current.add(
                 0,
@@ -136,7 +292,7 @@ class LocalPrefsStore(private val context: Context) {
                     infoHash = torrent.infoHash.take(128),
                     detailPageUrl = torrent.detailPageUrl.take(1000),
                     qualityTags = torrent.qualityTags.map { it.label }.take(10),
-                    createdAt = nowTs,
+                    createdAt = preservedCreatedAt,
                     updatedAt = nowTs
                 )
             )
@@ -402,5 +558,39 @@ class LocalPrefsStore(private val context: Context) {
                 }
             }
         }.getOrDefault(emptyList())
+    }
+
+    private fun encodeSyncAccountPrefs(map: Map<String, SyncAccountPrefs>): String {
+        val root = JSONObject()
+        map.forEach { (uid, prefs) ->
+            val obj = JSONObject()
+            obj.put("enrolled", prefs.enrolled)
+            obj.put("syncHistory", prefs.syncHistory)
+            obj.put("syncMirrors", prefs.syncMirrors)
+            root.put(uid, obj)
+        }
+        return root.toString()
+    }
+
+    private fun decodeSyncAccountPrefs(raw: String?): Map<String, SyncAccountPrefs> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching {
+            val root = JSONObject(raw)
+            buildMap {
+                val keys = root.keys()
+                while (keys.hasNext()) {
+                    val uid = keys.next()
+                    val obj = root.optJSONObject(uid) ?: continue
+                    put(
+                        uid,
+                        SyncAccountPrefs(
+                            enrolled = obj.optBoolean("enrolled", false),
+                            syncHistory = obj.optBoolean("syncHistory", false),
+                            syncMirrors = obj.optBoolean("syncMirrors", false)
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyMap())
     }
 }

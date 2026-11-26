@@ -1,336 +1,286 @@
 package com.example.data.firebase
 
 import android.content.Context
-import com.example.R
+import com.example.data.auth.GoogleAuthManager
+import com.example.data.local.BookmarkSaveOutcome
 import com.example.data.local.LocalPrefsStore
+import com.example.data.local.VaultExportInput
+import com.example.data.local.VaultLocalRepository
+import com.example.data.local.db.BookmarkEntity
+import com.example.data.local.db.BookmarkWithCollections
+import com.example.data.local.db.CollectionEntity
+import com.example.data.local.db.CollectionWithCount
+import com.example.data.local.db.MigrationStatusEntity
+import com.example.data.sync.FirestoreSyncEngine
+import com.example.data.sync.SyncRuntimeRegistry
+import com.example.data.sync.SyncSessionStatus
 import com.example.model.BookmarkRecord
+import com.example.model.CustomSite
 import com.example.model.IndexerSource
 import com.example.model.MirrorConfig
-import com.example.model.MirrorConfigRecord
 import com.example.model.QualityAndHealthParser
 import com.example.model.SearchHistoryRecord
 import com.example.model.TorrentCategory
 import com.example.model.TorrentResult
-import com.google.firebase.Firebase
-import com.google.firebase.FirebaseApp
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.auth
-import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FirebaseFirestoreException
-import com.google.firebase.firestore.Query
-import com.google.firebase.firestore.snapshots
-import kotlinx.coroutines.CancellationException
+import com.google.firebase.Timestamp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.emitAll
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.tasks.await
-import java.util.Locale
+import kotlinx.coroutines.launch
 
 /**
- * Dual-mode repository:
- * - When [isCloudMode] is true (user signed in with Google): reads & writes per-user Firestore collections.
- * - When [isCloudMode] is false (Guest / Local Mode): persists strictly in [LocalPrefsStore] without ever touching Firestore.
+ * Local-first Vault & Sync repository.
+ * Room is always the single source of truth; Firestore sync is strictly optional,
+ * opt-in per account, and coordinated via the durable outbox in [FirestoreSyncEngine].
  */
 class CloudSyncRepository(
     private val appContext: Context,
     private val prefsStore: LocalPrefsStore,
-    val isCloudMode: Boolean
+    val isCloudMode: Boolean = false,
+    private val accountUidOverride: String? = null,
+    private val localRepoOverride: VaultLocalRepository? = null,
+    private val syncEngineOverride: FirestoreSyncEngine? = null
 ) {
-    private val auth: FirebaseAuth? by lazy {
-        if (FirebaseApp.getApps(appContext).isNotEmpty()) Firebase.auth else null
-    }
+    private val syncScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
-    private val db: FirebaseFirestore by lazy {
-        FirebaseFirestore.getInstance(
-            appContext.getString(R.string.firestore_database_id)
-        )
-    }
+    private val runtimeContainer by lazy { SyncRuntimeRegistry.getContainer(appContext) }
+    val localRepo: VaultLocalRepository get() = localRepoOverride ?: runtimeContainer.localRepo
+    val syncEngine: FirestoreSyncEngine get() = syncEngineOverride ?: runtimeContainer.syncEngine
 
-    private fun requireUserId(): String {
-        val uid = auth?.currentUser?.uid
-        if (uid.isNullOrBlank()) {
-            throw IllegalStateException("User must be signed in with Google before accessing Firestore.")
-        }
-        return uid
-    }
+    private fun currentUid(): String? =
+        accountUidOverride?.takeIf { it.isNotBlank() }
+            ?: GoogleAuthManager.currentUserOrNull(appContext)?.uid
+
+    val syncStatus: StateFlow<SyncSessionStatus> get() = syncEngine.syncStatus
+
+    fun observeMigrationStatus(): Flow<MigrationStatusEntity?> = localRepo.observeMigrationStatus()
+
+    suspend fun retryMigration(): MigrationStatusEntity = localRepo.retryMigration()
 
     // --- BOOKMARKS ---
-    fun observeBookmarks(): Flow<List<BookmarkRecord>> {
-        if (!isCloudMode) return prefsStore.localBookmarksFlow
-        return flow {
-            val uid = requireUserId()
-            val path = "users/$uid/bookmarks"
-            emitAll(
-                db.collection("users").document(uid).collection("bookmarks")
-                    .orderBy("createdAt", Query.Direction.DESCENDING)
-                    .snapshots()
-                    .map { snap ->
-                        snap.toObjects(
-                            BookmarkRecord::class.java,
-                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                        )
-                    }
-                    .catch { error ->
-                        val fsErr = generateSequence(error) { it.cause }
-                            .filterIsInstance<FirebaseFirestoreException>()
-                            .firstOrNull()
-                        if (fsErr == null && error is CancellationException) throw error
-                        val toLog = fsErr ?: (error as? Exception)
-                        if (toLog != null && auth?.currentUser?.uid == uid) {
-                            handleFirestoreError(toLog, OperationType.LIST, path)
-                        }
-                        throw error
-                    }
-            )
+    fun observeBookmarksWithCollections(): Flow<List<BookmarkWithCollections>> =
+        localRepo.observeBookmarks(currentUid())
+
+    fun observeBookmarks(): Flow<List<BookmarkRecord>> =
+        localRepo.observeBookmarks(currentUid()).map { list ->
+            list.map { it.bookmark.toBookmarkRecord() }
         }
+
+    fun observeActiveBookmarkMatchKeys(): Flow<Set<String>> =
+        localRepo.observeActiveMatchKeys(currentUid())
+
+    fun observeSearchHistoryEnabled(): Flow<Boolean> = prefsStore.searchHistoryEnabledFlow
+
+    suspend fun addBookmark(
+        torrent: TorrentResult,
+        replaceUnresolvedDocId: String? = null,
+        existingLocalIdHint: String? = null
+    ): Result<Unit> {
+        return saveOrUpgradeBookmark(
+            torrent = torrent,
+            replaceUnresolvedDocId = replaceUnresolvedDocId,
+            existingLocalIdHint = existingLocalIdHint
+        ).map { Unit }
     }
 
-    suspend fun addBookmark(torrent: TorrentResult): Result<Unit> {
-        val docId = bookmarkDocId(torrent)
-        if (!isCloudMode) {
-            return runCatching { prefsStore.addLocalBookmark(docId, torrent) }
+    suspend fun saveOrUpgradeBookmark(
+        torrent: TorrentResult,
+        replaceUnresolvedDocId: String? = null,
+        existingLocalIdHint: String? = null
+    ): Result<BookmarkSaveOutcome> {
+        val uid = currentUid()
+        val resolvedHint = existingLocalIdHint ?: replaceUnresolvedDocId?.let { legacyHint ->
+            localRepo.findLocalIdForCandidateKeys(listOf(legacyHint, "legacy:$legacyHint"), uid)
         }
-        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/bookmarks/$docId"
-        return try {
-            val uid = requireUserId()
-            val ref = db.collection("users").document(uid).collection("bookmarks").document(docId)
-            docPath = ref.path
-            val existing = ref.get().await()
-            if (existing.exists()) {
-                val updatePayload = mapOf(
-                    "magnetUri" to (torrent.magnetUri ?: "").take(4000),
-                    "seeders" to torrent.seeders.toLong().coerceAtLeast(0L),
-                    "leechers" to torrent.leechers.toLong().coerceAtLeast(0L),
-                    "sizeLabel" to torrent.sizeLabel.take(64),
-                    "sizeBytes" to torrent.sizeBytes.coerceAtLeast(0L),
-                    "updatedAt" to FieldValue.serverTimestamp()
-                )
-                ref.update(updatePayload).await()
-            } else {
-                val createPayload = BookmarkRecord.toCreateMap(uid, torrent)
-                ref.set(createPayload).await()
-            }
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, docPath)
-            Result.failure(e)
+        val syncCtx = syncEngine.getActiveSyncContext(uid)
+        val outcome = localRepo.saveOrUpdateBookmark(
+            torrent = torrent,
+            existingLocalIdHint = resolvedHint,
+            syncContext = syncCtx,
+            forceResave = true
+        )
+        if (outcome.isSuccess && syncCtx != null) {
+            triggerDrainOrSchedule(syncCtx.accountUid)
         }
+        return outcome
     }
 
-    suspend fun removeBookmark(bookmarkId: String): Result<Unit> {
-        val safeId = QualityAndHealthParser.sanitizeDocumentId(bookmarkId)
-        if (!isCloudMode) {
-            return runCatching { prefsStore.removeLocalBookmark(safeId) }
+    suspend fun removeBookmarkByLocalIdOrDocId(idOrKey: String): Result<String?> {
+        val uid = currentUid()
+        val resolvedLocalId = localRepo.findLocalIdForCandidateKeys(listOf(idOrKey, "legacy:$idOrKey"), uid)
+            ?: idOrKey
+        val syncCtx = syncEngine.getActiveSyncContext(uid)
+        val res = localRepo.removeBookmark(resolvedLocalId, syncCtx)
+        if (res.isSuccess && syncCtx != null) {
+            triggerDrainOrSchedule(syncCtx.accountUid)
         }
-        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/bookmarks/$safeId"
-        return try {
-            val uid = requireUserId()
-            val ref = db.collection("users").document(uid).collection("bookmarks").document(safeId)
-            docPath = ref.path
-            ref.delete().await()
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, docPath)
-            Result.failure(e)
-        }
+        return res.map { if (it) resolvedLocalId else null }
     }
+
+    suspend fun removeBookmark(bookmarkId: String): Result<Unit> =
+        removeBookmarkByLocalIdOrDocId(bookmarkId).map { Unit }
+
+    suspend fun undoRemoveBookmark(localId: String): Result<Boolean> {
+        val uid = currentUid()
+        val syncCtx = syncEngine.getActiveSyncContext(uid)
+        val res = localRepo.undoRemoveBookmark(localId, syncCtx)
+        if (res.isSuccess && syncCtx != null) {
+            triggerDrainOrSchedule(syncCtx.accountUid)
+        }
+        return res
+    }
+
+    suspend fun findLocalBookmarkIdForKeys(candidateKeys: List<String>): String? =
+        localRepo.findLocalIdForCandidateKeys(candidateKeys, currentUid())
+
+    fun unresolvedBookmarkDocId(source: IndexerSource, listingId: String): String =
+        QualityAndHealthParser.sanitizeDocumentId("bm_${source.name}_$listingId")
 
     fun bookmarkDocId(torrent: TorrentResult): String {
-        val seed = torrent.infoHash.ifBlank { "${torrent.source.name}_${torrent.id}" }
+        val canonicalHash = torrent.canonicalHashHex.ifBlank { torrent.infoHash }
+        val seed = canonicalHash.ifBlank { "${torrent.source.name}_${torrent.listingId.ifBlank { torrent.id }}" }
         return QualityAndHealthParser.sanitizeDocumentId("bm_$seed")
     }
 
+    // --- COLLECTIONS (LOCAL ONLY) ---
+    fun observeCollections(): Flow<List<CollectionWithCount>> =
+        localRepo.observeCollections(currentUid())
+
+    suspend fun createCollection(name: String): Result<CollectionEntity> =
+        localRepo.createCollection(name)
+
+    suspend fun renameCollection(collectionId: String, newName: String): Result<Unit> =
+        localRepo.renameCollection(collectionId, newName)
+
+    suspend fun deleteCollection(collectionId: String): Result<Unit> =
+        localRepo.deleteCollection(collectionId)
+
+    suspend fun setBookmarkCollections(bookmarkLocalId: String, collectionIds: Set<String>): Result<Unit> =
+        localRepo.setBookmarkCollections(bookmarkLocalId, collectionIds)
+
     // --- SEARCH HISTORY ---
-    fun observeSearchHistory(): Flow<List<SearchHistoryRecord>> {
-        if (!isCloudMode) return prefsStore.localSearchHistoryFlow
-        return flow {
-            val uid = requireUserId()
-            val path = "users/$uid/search_history"
-            emitAll(
-                db.collection("users").document(uid).collection("search_history")
-                    .orderBy("updatedAt", Query.Direction.DESCENDING)
-                    .limit(20)
-                    .snapshots()
-                    .map { snap ->
-                        snap.toObjects(
-                            SearchHistoryRecord::class.java,
-                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                        )
-                    }
-                    .catch { error ->
-                        val fsErr = generateSequence(error) { it.cause }
-                            .filterIsInstance<FirebaseFirestoreException>()
-                            .firstOrNull()
-                        if (fsErr == null && error is CancellationException) throw error
-                        val toLog = fsErr ?: (error as? Exception)
-                        if (toLog != null && auth?.currentUser?.uid == uid) {
-                            handleFirestoreError(toLog, OperationType.LIST, path)
-                        }
-                        throw error
-                    }
-            )
+    fun observeSearchHistory(): Flow<List<SearchHistoryRecord>> =
+        localRepo.observeHistory(currentUid()).map { entries ->
+            entries.map { entry ->
+                SearchHistoryRecord(
+                    id = entry.entryId,
+                    userId = entry.originScope,
+                    query = entry.query,
+                    category = entry.category,
+                    createdAt = Timestamp(entry.createdAtEpochMs / 1000L, 0),
+                    updatedAt = Timestamp(entry.updatedAtEpochMs / 1000L, 0),
+                    revision = entry.localRevision,
+                    deleted = entry.isDeleted
+                )
+            }
         }
-    }
 
     suspend fun recordSearchQuery(query: String, category: TorrentCategory): Result<Unit> {
-        val trimmed = query.trim().take(200)
-        if (trimmed.isBlank()) return Result.success(Unit)
-        if (!isCloudMode) {
-            return runCatching { prefsStore.recordLocalSearchQuery(trimmed, category) }
+        val uid = currentUid()
+        val syncCtx = syncEngine.getActiveSyncContext(uid)
+        val res = localRepo.recordSearchQuery(query, category, syncCtx)
+        if (res.isSuccess && syncCtx != null && syncCtx.syncHistory) {
+            triggerDrainOrSchedule(syncCtx.accountUid)
         }
-        val entryId = QualityAndHealthParser.sanitizeDocumentId(
-            "q_${trimmed.lowercase(Locale.US).hashCode().toUInt()}"
-        )
-        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/search_history/$entryId"
-        return try {
-            val uid = requireUserId()
-            val ref = db.collection("users").document(uid).collection("search_history").document(entryId)
-            docPath = ref.path
-            val existing = ref.get().await()
-            if (existing.exists()) {
-                ref.update(
-                    mapOf(
-                        "category" to category.name,
-                        "updatedAt" to FieldValue.serverTimestamp()
-                    )
-                ).await()
-            } else {
-                ref.set(SearchHistoryRecord.toCreateMap(uid, trimmed, category)).await()
-            }
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, docPath)
-            Result.failure(e)
-        }
+        return res
     }
 
     suspend fun deleteSearchHistoryEntry(entryId: String): Result<Unit> {
-        val safeId = QualityAndHealthParser.sanitizeDocumentId(entryId)
-        if (!isCloudMode) {
-            return runCatching { prefsStore.deleteLocalSearchHistory(safeId) }
+        val uid = currentUid()
+        val syncCtx = syncEngine.getActiveSyncContext(uid)
+        val res = localRepo.deleteHistoryEntry(entryId, syncCtx)
+        if (res.isSuccess && syncCtx != null && syncCtx.syncHistory) {
+            triggerDrainOrSchedule(syncCtx.accountUid)
         }
-        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/search_history/$safeId"
-        return try {
-            val uid = requireUserId()
-            val ref = db.collection("users").document(uid).collection("search_history").document(safeId)
-            docPath = ref.path
-            ref.delete().await()
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, docPath)
-            Result.failure(e)
-        }
+        return res
     }
 
     suspend fun clearAllSearchHistory(): Result<Unit> {
-        if (!isCloudMode) {
-            return runCatching { prefsStore.clearAllLocalSearchHistory() }
+        val uid = currentUid()
+        val syncCtx = syncEngine.getActiveSyncContext(uid)
+        val res = localRepo.clearAllHistory(syncCtx)
+        if (res.isSuccess && syncCtx != null && syncCtx.syncHistory) {
+            triggerDrainOrSchedule(syncCtx.accountUid)
         }
-        var path = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/search_history"
-        return try {
-            val uid = requireUserId()
-            path = "users/$uid/search_history"
-            val docs = db.collection("users").document(uid).collection("search_history").get().await()
-            val batch = db.batch()
-            docs.documents.forEach { batch.delete(it.reference) }
-            batch.commit().await()
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.DELETE, path)
-            Result.failure(e)
-        }
+        return res
     }
+
+    // --- CUSTOM SITES (LOCAL ONLY) ---
+    fun observeCustomSites(): Flow<List<CustomSite>> = localRepo.observeCustomSites()
+
+    suspend fun addCustomSite(name: String, normalizedUrl: String): Result<Unit> =
+        localRepo.addCustomSite(name, normalizedUrl)
+
+    suspend fun updateCustomSite(siteId: String, name: String, normalizedUrl: String): Result<Unit> =
+        localRepo.updateCustomSite(siteId, name, normalizedUrl)
+
+    suspend fun removeCustomSite(siteId: String): Result<Unit> =
+        localRepo.removeCustomSite(siteId)
 
     // --- MIRROR CONFIGS ---
-    fun observeMirrorConfigs(): Flow<Map<IndexerSource, MirrorConfig>> {
-        if (!isCloudMode) return prefsStore.localMirrorConfigsFlow
-        return flow {
-            val uid = requireUserId()
-            val path = "users/$uid/mirror_configs"
-            emitAll(
-                db.collection("users").document(uid).collection("mirror_configs")
-                    .snapshots()
-                    .map { snap ->
-                        val saved = snap.toObjects(
-                            MirrorConfigRecord::class.java,
-                            DocumentSnapshot.ServerTimestampBehavior.ESTIMATE
-                        ).associate { record ->
-                            val cfg = record.toMirrorConfig()
-                            cfg.provider to cfg
-                        }
-                        IndexerSource.entries.associateWith { source ->
-                            saved[source] ?: MirrorConfig(provider = source)
-                        }
-                    }
-                    .catch { error ->
-                        val fsErr = generateSequence(error) { it.cause }
-                            .filterIsInstance<FirebaseFirestoreException>()
-                            .firstOrNull()
-                        if (fsErr == null && error is CancellationException) throw error
-                        val toLog = fsErr ?: (error as? Exception)
-                        if (toLog != null && auth?.currentUser?.uid == uid) {
-                            handleFirestoreError(toLog, OperationType.LIST, path)
-                        }
-                        throw error
-                    }
-            )
-        }
-    }
+    fun observeMirrorConfigs(): Flow<Map<IndexerSource, MirrorConfig>> =
+        localRepo.observeMirrorConfigs()
 
     suspend fun saveMirrorConfig(config: MirrorConfig): Result<Unit> {
-        if (!isCloudMode) {
-            return runCatching { prefsStore.saveLocalMirrorConfig(config) }
+        val uid = currentUid()
+        val syncCtx = syncEngine.getActiveSyncContext(uid)
+        val res = localRepo.saveMirrorConfig(config, syncCtx)
+        if (res.isSuccess && syncCtx != null && syncCtx.syncMirrors) {
+            triggerDrainOrSchedule(syncCtx.accountUid)
         }
-        val providerId = config.provider.name
-        var docPath = "users/${auth?.currentUser?.uid ?: "unauthenticated"}/mirror_configs/$providerId"
-        return try {
-            val uid = requireUserId()
-            val ref = db.collection("users").document(uid)
-                .collection("mirror_configs").document(providerId)
-            docPath = ref.path
-            val existing = ref.get().await()
-            if (existing.exists()) {
-                ref.update(MirrorConfigRecord.toUpdateMap(config)).await()
-            } else {
-                ref.set(MirrorConfigRecord.toCreateMap(uid, config)).await()
-            }
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            handleFirestoreError(e, OperationType.WRITE, docPath)
-            Result.failure(e)
-        }
+        return res
     }
 
     suspend fun resetAllMirrorsToDefault(): Result<Unit> {
-        if (!isCloudMode) {
-            return runCatching { prefsStore.resetLocalMirrorsToDefault() }
+        val uid = currentUid()
+        val syncCtx = syncEngine.getActiveSyncContext(uid)
+        val res = localRepo.resetAllMirrorsToDefault(syncCtx)
+        if (res.isSuccess && syncCtx != null && syncCtx.syncMirrors) {
+            triggerDrainOrSchedule(syncCtx.accountUid)
         }
-        return try {
-            IndexerSource.entries.forEach { src ->
-                val res = saveMirrorConfig(MirrorConfig(provider = src))
-                if (res.isFailure) return res
+        return res
+    }
+
+    // --- EXPORT ---
+    suspend fun buildExportInput(): VaultExportInput =
+        localRepo.buildExportInput(currentUid())
+
+    private fun triggerDrainOrSchedule(uid: String) {
+        syncScope.launch {
+            if (SyncRuntimeRegistry.isNetworkConnected(appContext)) {
+                val res = syncEngine.drainOutbox(uid)
+                if (res.hadTransientFailure) {
+                    syncEngine.scheduleBackgroundSyncIfPending(uid)
+                }
+            } else {
+                syncEngine.scheduleBackgroundSyncIfPending(uid)
             }
-            Result.success(Unit)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Result.failure(e)
         }
     }
+
+    private fun BookmarkEntity.toBookmarkRecord(): BookmarkRecord = BookmarkRecord(
+        id = localId,
+        userId = originScope,
+        title = title,
+        source = source,
+        category = category,
+        sizeLabel = sizeLabel,
+        sizeBytes = sizeBytes,
+        seeders = seeders.toLong(),
+        leechers = leechers.toLong(),
+        uploadDateLabel = uploadDateLabel,
+        magnetUri = magnetUri,
+        infoHash = canonicalHashHex.ifBlank { infoHash },
+        detailPageUrl = detailPageUrl,
+        qualityTags = qualityTagNames(),
+        createdAt = Timestamp(createdAtEpochMs / 1000L, 0),
+        updatedAt = Timestamp(updatedAtEpochMs / 1000L, 0),
+        revision = localRevision,
+        deleted = isDeleted,
+        canonicalIdentity = canonicalKey,
+        legacyDocId = legacyDocId
+    )
 }

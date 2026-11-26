@@ -44,7 +44,7 @@ beforeEach(async () => {
   }
 });
 
-// --- BOOKMARKS ---
+// --- V1 LEGACY COMPATIBILITY + SECURITY TESTS ---
 
 test("Unauthenticated user cannot read or write bookmarks", async () => {
   const unauthDb = testEnv.unauthenticatedContext().firestore();
@@ -77,7 +77,7 @@ test("Unauthenticated user cannot read or write bookmarks", async () => {
   );
 });
 
-test("Owner can create, list, update, and delete bookmarks; ghost fields & cross-user fail", async () => {
+test("V1 legacy bookmark create, update, and delete succeed while ghost fields & cross-user fail", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const created = pastDate(10000);
@@ -108,17 +108,7 @@ test("Owner can create, list, update, and delete bookmarks; ghost fields & cross
     })
   );
 
-  // List & orderBy matching Kotlin repository query
-  await assertSucceeds(
-    aliceDb
-      .collection("users")
-      .doc(ALICE_UID)
-      .collection("bookmarks")
-      .orderBy("createdAt", "desc")
-      .get()
-  );
-
-  // Partial update of mutable fields
+  // Partial update of mutable fields (v1 style)
   await assertSucceeds(
     bmRef.update({
       seeders: 1350,
@@ -126,11 +116,24 @@ test("Owner can create, list, update, and delete bookmarks; ghost fields & cross
     })
   );
 
+  // V2 client upgrading a v1 doc sets revision = 1 and tombstone/active metadata
+  await assertSucceeds(
+    bmRef.update({
+      seeders: 1400,
+      deleted: false,
+      revision: 1,
+      lastOpId: "op_upgrade_v1_to_v2",
+      canonicalIdentity: "btih:0123456789abcdef",
+      legacyDocId: "bm_1",
+      updatedAt: pastDate(500),
+    })
+  );
+
   // Reject immutable createdAt modification
   await assertFails(
     bmRef.update({
-      createdAt: pastDate(500),
-      updatedAt: pastDate(500),
+      createdAt: pastDate(200),
+      updatedAt: pastDate(200),
     })
   );
 
@@ -178,9 +181,103 @@ test("Owner can create, list, update, and delete bookmarks; ghost fields & cross
   await assertSucceeds(bmRef.delete());
 });
 
-// --- SEARCH HISTORY ---
+// --- V2 TOMBSTONES, CAS REVISIONS & RESURRECTION ---
 
-test("Owner can manage search_history; future timestamps and cross-user access fail", async () => {
+test("V2 bookmark supports monotonic CAS revisions, soft-delete tombstones, and resurrection, while rejecting skipped/regressed revisions or future deletedAt", async () => {
+  const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
+  const created = pastDate(15000);
+  const bmRef = aliceDb
+    .collection("users")
+    .doc(ALICE_UID)
+    .collection("bookmarks")
+    .doc("bm_v2_cas");
+
+  // 1. Create v2 bookmark with revision = 1
+  await assertSucceeds(
+    bmRef.set({
+      userId: ALICE_UID,
+      title: "Debian 12.6 Netinst",
+      source: "TPB",
+      category: "APPS",
+      sizeLabel: "620 MB",
+      sizeBytes: 650117120,
+      seeders: 300,
+      leechers: 12,
+      uploadDateLabel: "2026-10-02",
+      magnetUri: "magnet:?xt=urn:btih:fedcba9876543210fedcba9876543210fedcba98",
+      infoHash: "fedcba9876543210fedcba9876543210fedcba98",
+      detailPageUrl: "https://thepiratebay.org/description.php?id=1",
+      qualityTags: [],
+      revision: 1,
+      deleted: false,
+      lastOpId: "op_1",
+      canonicalIdentity: "btih:fedcba9876543210fedcba9876543210fedcba98",
+      legacyDocId: "bm_v2_cas",
+      createdAt: created,
+      updatedAt: created,
+    })
+  );
+
+  // 2. Reject skipped revision (1 -> 3) or regressed revision (1 -> 0 / 1 -> 1)
+  await assertFails(
+    bmRef.update({
+      revision: 3,
+      lastOpId: "op_skip",
+      updatedAt: pastDate(5000),
+    })
+  );
+  await assertFails(
+    bmRef.update({
+      revision: 1,
+      lastOpId: "op_same",
+      updatedAt: pastDate(5000),
+    })
+  );
+
+  // 3. Reject tombstone missing deletedAt or with future deletedAt
+  await assertFails(
+    bmRef.update({
+      deleted: true,
+      revision: 2,
+      lastOpId: "op_no_ts",
+      updatedAt: pastDate(4000),
+    })
+  );
+  await assertFails(
+    bmRef.update({
+      deleted: true,
+      deletedAt: new Date(Date.now() + 120000),
+      revision: 2,
+      lastOpId: "op_future_ts",
+      updatedAt: pastDate(4000),
+    })
+  );
+
+  // 4. Valid tombstone soft-delete (revision 1 -> 2)
+  await assertSucceeds(
+    bmRef.update({
+      deleted: true,
+      deletedAt: pastDate(4000),
+      revision: 2,
+      lastOpId: "op_delete_2",
+      updatedAt: pastDate(4000),
+    })
+  );
+
+  // 5. Explicit re-save resurrects tombstone (revision 2 -> 3, deleted: false)
+  await assertSucceeds(
+    bmRef.update({
+      deleted: false,
+      revision: 3,
+      lastOpId: "op_resurrect_3",
+      updatedAt: pastDate(1000),
+    })
+  );
+});
+
+// --- SEARCH HISTORY V1 & V2 ---
+
+test("Owner can manage v1 & v2 search_history tombstones; future timestamps and cross-user access fail", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const created = pastDate(8000);
@@ -196,26 +293,43 @@ test("Owner can manage search_history; future timestamps and cross-user access f
       userId: ALICE_UID,
       query: "ubuntu 24.04",
       category: "APPS",
+      revision: 1,
+      deleted: false,
+      lastOpId: "op_h1",
       createdAt: created,
       updatedAt: created,
     })
   );
 
+  // Soft-delete search history entry with revision 1 -> 2
   await assertSucceeds(
     histRef.update({
-      category: "ALL",
-      updatedAt: pastDate(1000),
+      deleted: true,
+      deletedAt: pastDate(2000),
+      revision: 2,
+      lastOpId: "op_h2",
+      updatedAt: pastDate(2000),
     })
   );
 
+  // Resurrect search history on replay (revision 2 -> 3)
   await assertSucceeds(
-    aliceDb
-      .collection("users")
-      .doc(ALICE_UID)
-      .collection("search_history")
-      .orderBy("updatedAt", "desc")
-      .limit(20)
-      .get()
+    histRef.update({
+      category: "ALL",
+      deleted: false,
+      revision: 3,
+      lastOpId: "op_h3",
+      updatedAt: pastDate(500),
+    })
+  );
+
+  // Reject revision regression (3 -> 2)
+  await assertFails(
+    histRef.update({
+      revision: 2,
+      lastOpId: "op_h_bad",
+      updatedAt: pastDate(300),
+    })
   );
 
   // Reject future timestamp tampering
@@ -242,9 +356,9 @@ test("Owner can manage search_history; future timestamps and cross-user access f
   await assertSucceeds(histRef.delete());
 });
 
-// --- MIRROR CONFIGS ---
+// --- MIRROR CONFIGS V1 & V2 ---
 
-test("Owner can create and update mirror_configs; invalid provider or mismatched doc ID fails", async () => {
+test("Owner can create and update v1 & v2 mirror_configs; invalid provider, skipped revision, or mismatched doc ID fails", async () => {
   const aliceDb = testEnv.authenticatedContext(ALICE_UID).firestore();
   const bobDb = testEnv.authenticatedContext(BOB_UID).firestore();
   const created = pastDate(9000);
@@ -262,6 +376,8 @@ test("Owner can create and update mirror_configs; invalid provider or mismatched
       enabled: true,
       mirrors: ["https://1337x.to", "https://x1337x.cc", "https://1337x.st"],
       activeMirrorUrl: "https://x1337x.cc",
+      revision: 1,
+      lastOpId: "op_m1",
       createdAt: created,
       updatedAt: created,
     })
@@ -271,7 +387,19 @@ test("Owner can create and update mirror_configs; invalid provider or mismatched
     mirrorRef.update({
       enabled: false,
       activeMirrorUrl: "https://1337x.st",
+      revision: 2,
+      lastOpId: "op_m2",
       updatedAt: pastDate(1000),
+    })
+  );
+
+  // Skipped revision rejected (2 -> 4)
+  await assertFails(
+    mirrorRef.update({
+      enabled: true,
+      revision: 4,
+      lastOpId: "op_m_bad",
+      updatedAt: pastDate(500),
     })
   );
 

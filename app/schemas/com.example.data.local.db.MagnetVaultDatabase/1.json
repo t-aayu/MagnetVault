@@ -1,0 +1,1017 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "411ed31b47c82ef33844366b39b68797",
+    "entities": [
+      {
+        "tableName": "bookmarks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`local_id` TEXT NOT NULL, `origin_scope` TEXT NOT NULL, `canonical_key` TEXT NOT NULL, `hash_family` TEXT, `canonical_hash_hex` TEXT NOT NULL, `legacy_doc_id` TEXT NOT NULL, `title` TEXT NOT NULL, `source` TEXT NOT NULL, `category` TEXT NOT NULL, `size_label` TEXT NOT NULL, `size_bytes` INTEGER NOT NULL, `known_size_bytes` INTEGER, `seeders` INTEGER NOT NULL, `known_seeders` INTEGER, `leechers` INTEGER NOT NULL, `known_leechers` INTEGER, `upload_date_label` TEXT NOT NULL, `upload_epoch_seconds` INTEGER NOT NULL, `known_upload_epoch_seconds` INTEGER, `magnet_uri` TEXT NOT NULL, `info_hash` TEXT NOT NULL, `detail_page_url` TEXT NOT NULL, `listing_id` TEXT NOT NULL, `quality_tags_json` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, `local_revision` INTEGER NOT NULL, `is_deleted` INTEGER NOT NULL, `deleted_at_ms` INTEGER, PRIMARY KEY(`local_id`))",
+        "fields": [
+          {
+            "fieldPath": "localId",
+            "columnName": "local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originScope",
+            "columnName": "origin_scope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "canonicalKey",
+            "columnName": "canonical_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hashFamily",
+            "columnName": "hash_family",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "canonicalHashHex",
+            "columnName": "canonical_hash_hex",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "legacyDocId",
+            "columnName": "legacy_doc_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeLabel",
+            "columnName": "size_label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "size_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "knownSizeBytes",
+            "columnName": "known_size_bytes",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "seeders",
+            "columnName": "seeders",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "knownSeeders",
+            "columnName": "known_seeders",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "leechers",
+            "columnName": "leechers",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "knownLeechers",
+            "columnName": "known_leechers",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "uploadDateLabel",
+            "columnName": "upload_date_label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadEpochSeconds",
+            "columnName": "upload_epoch_seconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "knownUploadEpochSeconds",
+            "columnName": "known_upload_epoch_seconds",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "magnetUri",
+            "columnName": "magnet_uri",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "infoHash",
+            "columnName": "info_hash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detailPageUrl",
+            "columnName": "detail_page_url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "listingId",
+            "columnName": "listing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "qualityTagsJson",
+            "columnName": "quality_tags_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localRevision",
+            "columnName": "local_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDeleted",
+            "columnName": "is_deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deletedAtEpochMs",
+            "columnName": "deleted_at_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "local_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_bookmarks_origin_scope_canonical_key",
+            "unique": true,
+            "columnNames": [
+              "origin_scope",
+              "canonical_key"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_bookmarks_origin_scope_canonical_key` ON `${TABLE_NAME}` (`origin_scope`, `canonical_key`)"
+          },
+          {
+            "name": "index_bookmarks_legacy_doc_id",
+            "unique": false,
+            "columnNames": [
+              "legacy_doc_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_bookmarks_legacy_doc_id` ON `${TABLE_NAME}` (`legacy_doc_id`)"
+          },
+          {
+            "name": "index_bookmarks_is_deleted_updated_at_ms",
+            "unique": false,
+            "columnNames": [
+              "is_deleted",
+              "updated_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_bookmarks_is_deleted_updated_at_ms` ON `${TABLE_NAME}` (`is_deleted`, `updated_at_ms`)"
+          }
+        ]
+      },
+      {
+        "tableName": "provider_listings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `bookmark_local_id` TEXT NOT NULL, `source` TEXT NOT NULL, `listing_id` TEXT NOT NULL, `detail_page_url` TEXT NOT NULL, `size_bytes` INTEGER NOT NULL, `seeders` INTEGER NOT NULL, `leechers` INTEGER NOT NULL, `upload_date_label` TEXT NOT NULL, `updated_at_ms` INTEGER NOT NULL, FOREIGN KEY(`bookmark_local_id`) REFERENCES `bookmarks`(`local_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bookmarkLocalId",
+            "columnName": "bookmark_local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "source",
+            "columnName": "source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "listingId",
+            "columnName": "listing_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detailPageUrl",
+            "columnName": "detail_page_url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sizeBytes",
+            "columnName": "size_bytes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seeders",
+            "columnName": "seeders",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "leechers",
+            "columnName": "leechers",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "uploadDateLabel",
+            "columnName": "upload_date_label",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_provider_listings_bookmark_local_id",
+            "unique": false,
+            "columnNames": [
+              "bookmark_local_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_provider_listings_bookmark_local_id` ON `${TABLE_NAME}` (`bookmark_local_id`)"
+          },
+          {
+            "name": "index_provider_listings_bookmark_local_id_source_listing_id",
+            "unique": true,
+            "columnNames": [
+              "bookmark_local_id",
+              "source",
+              "listing_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_provider_listings_bookmark_local_id_source_listing_id` ON `${TABLE_NAME}` (`bookmark_local_id`, `source`, `listing_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "bookmarks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "bookmark_local_id"
+            ],
+            "referencedColumns": [
+              "local_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "identity_aliases",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`origin_scope` TEXT NOT NULL, `alias_key` TEXT NOT NULL, `bookmark_local_id` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, PRIMARY KEY(`origin_scope`, `alias_key`), FOREIGN KEY(`bookmark_local_id`) REFERENCES `bookmarks`(`local_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "originScope",
+            "columnName": "origin_scope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "aliasKey",
+            "columnName": "alias_key",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bookmarkLocalId",
+            "columnName": "bookmark_local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "origin_scope",
+            "alias_key"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_identity_aliases_bookmark_local_id",
+            "unique": false,
+            "columnNames": [
+              "bookmark_local_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_identity_aliases_bookmark_local_id` ON `${TABLE_NAME}` (`bookmark_local_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "bookmarks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "bookmark_local_id"
+            ],
+            "referencedColumns": [
+              "local_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "collections",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`collection_id` TEXT NOT NULL, `name` TEXT NOT NULL, `normalized_name` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`collection_id`))",
+        "fields": [
+          {
+            "fieldPath": "collectionId",
+            "columnName": "collection_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedName",
+            "columnName": "normalized_name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "collection_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_collections_normalized_name",
+            "unique": true,
+            "columnNames": [
+              "normalized_name"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_collections_normalized_name` ON `${TABLE_NAME}` (`normalized_name`)"
+          }
+        ]
+      },
+      {
+        "tableName": "collection_bookmarks",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`collection_id` TEXT NOT NULL, `bookmark_local_id` TEXT NOT NULL, `added_at_ms` INTEGER NOT NULL, PRIMARY KEY(`collection_id`, `bookmark_local_id`), FOREIGN KEY(`collection_id`) REFERENCES `collections`(`collection_id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`bookmark_local_id`) REFERENCES `bookmarks`(`local_id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "collectionId",
+            "columnName": "collection_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bookmarkLocalId",
+            "columnName": "bookmark_local_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "addedAtEpochMs",
+            "columnName": "added_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "collection_id",
+            "bookmark_local_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_collection_bookmarks_bookmark_local_id",
+            "unique": false,
+            "columnNames": [
+              "bookmark_local_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_collection_bookmarks_bookmark_local_id` ON `${TABLE_NAME}` (`bookmark_local_id`)"
+          },
+          {
+            "name": "index_collection_bookmarks_collection_id",
+            "unique": false,
+            "columnNames": [
+              "collection_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_collection_bookmarks_collection_id` ON `${TABLE_NAME}` (`collection_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "collections",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "collection_id"
+            ],
+            "referencedColumns": [
+              "collection_id"
+            ]
+          },
+          {
+            "table": "bookmarks",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "bookmark_local_id"
+            ],
+            "referencedColumns": [
+              "local_id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "search_history",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`entry_id` TEXT NOT NULL, `origin_scope` TEXT NOT NULL, `cloud_doc_id` TEXT NOT NULL, `query` TEXT NOT NULL, `normalized_query` TEXT NOT NULL, `category` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, `local_revision` INTEGER NOT NULL, `is_deleted` INTEGER NOT NULL, `deleted_at_ms` INTEGER, PRIMARY KEY(`entry_id`))",
+        "fields": [
+          {
+            "fieldPath": "entryId",
+            "columnName": "entry_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originScope",
+            "columnName": "origin_scope",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cloudDocId",
+            "columnName": "cloud_doc_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "query",
+            "columnName": "query",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedQuery",
+            "columnName": "normalized_query",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localRevision",
+            "columnName": "local_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDeleted",
+            "columnName": "is_deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deletedAtEpochMs",
+            "columnName": "deleted_at_ms",
+            "affinity": "INTEGER"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "entry_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_search_history_origin_scope_normalized_query",
+            "unique": true,
+            "columnNames": [
+              "origin_scope",
+              "normalized_query"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_search_history_origin_scope_normalized_query` ON `${TABLE_NAME}` (`origin_scope`, `normalized_query`)"
+          },
+          {
+            "name": "index_search_history_cloud_doc_id",
+            "unique": false,
+            "columnNames": [
+              "cloud_doc_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_search_history_cloud_doc_id` ON `${TABLE_NAME}` (`cloud_doc_id`)"
+          },
+          {
+            "name": "index_search_history_is_deleted_updated_at_ms",
+            "unique": false,
+            "columnNames": [
+              "is_deleted",
+              "updated_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_search_history_is_deleted_updated_at_ms` ON `${TABLE_NAME}` (`is_deleted`, `updated_at_ms`)"
+          }
+        ]
+      },
+      {
+        "tableName": "custom_sites",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`site_id` TEXT NOT NULL, `name` TEXT NOT NULL, `url` TEXT NOT NULL, `normalized_url` TEXT NOT NULL, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`site_id`))",
+        "fields": [
+          {
+            "fieldPath": "siteId",
+            "columnName": "site_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "url",
+            "columnName": "url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "normalizedUrl",
+            "columnName": "normalized_url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "site_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_custom_sites_normalized_url",
+            "unique": true,
+            "columnNames": [
+              "normalized_url"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_custom_sites_normalized_url` ON `${TABLE_NAME}` (`normalized_url`)"
+          }
+        ]
+      },
+      {
+        "tableName": "mirror_configs",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`provider` TEXT NOT NULL, `enabled` INTEGER NOT NULL, `mirrors_json` TEXT NOT NULL, `active_mirror_url` TEXT NOT NULL, `updated_at_ms` INTEGER NOT NULL, `local_revision` INTEGER NOT NULL, PRIMARY KEY(`provider`))",
+        "fields": [
+          {
+            "fieldPath": "provider",
+            "columnName": "provider",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "enabled",
+            "columnName": "enabled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mirrorsJson",
+            "columnName": "mirrors_json",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "activeMirrorUrl",
+            "columnName": "active_mirror_url",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localRevision",
+            "columnName": "local_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "provider"
+          ]
+        }
+      },
+      {
+        "tableName": "migration_status",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `legacy_import_completed` INTEGER NOT NULL, `legacy_import_version` INTEGER NOT NULL, `completed_at_ms` INTEGER, `imported_bookmarks_count` INTEGER NOT NULL, `imported_history_count` INTEGER NOT NULL, `imported_sites_count` INTEGER NOT NULL, `imported_mirrors_count` INTEGER NOT NULL, `malformed_bookmarks_count` INTEGER NOT NULL, `malformed_history_count` INTEGER NOT NULL, `malformed_sites_count` INTEGER NOT NULL, `malformed_mirrors_count` INTEGER NOT NULL, `last_error_category` TEXT, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "legacyImportCompleted",
+            "columnName": "legacy_import_completed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "legacyImportVersion",
+            "columnName": "legacy_import_version",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "completedAtEpochMs",
+            "columnName": "completed_at_ms",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "importedBookmarksCount",
+            "columnName": "imported_bookmarks_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importedHistoryCount",
+            "columnName": "imported_history_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importedSitesCount",
+            "columnName": "imported_sites_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importedMirrorsCount",
+            "columnName": "imported_mirrors_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "malformedBookmarksCount",
+            "columnName": "malformed_bookmarks_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "malformedHistoryCount",
+            "columnName": "malformed_history_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "malformedSitesCount",
+            "columnName": "malformed_sites_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "malformedMirrorsCount",
+            "columnName": "malformed_mirrors_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastErrorCategory",
+            "columnName": "last_error_category",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
+      },
+      {
+        "tableName": "sync_outbox",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`op_id` TEXT NOT NULL, `account_uid` TEXT NOT NULL, `entity_type` TEXT NOT NULL, `local_entity_id` TEXT NOT NULL, `cloud_doc_id` TEXT NOT NULL, `op_type` TEXT NOT NULL, `expected_server_revision` INTEGER NOT NULL, `target_local_revision` INTEGER NOT NULL, `is_explicit_resave` INTEGER NOT NULL, `status` TEXT NOT NULL, `attempt_count` INTEGER NOT NULL, `last_error_category` TEXT, `created_at_ms` INTEGER NOT NULL, `updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`op_id`))",
+        "fields": [
+          {
+            "fieldPath": "opId",
+            "columnName": "op_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accountUid",
+            "columnName": "account_uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entityType",
+            "columnName": "entity_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localEntityId",
+            "columnName": "local_entity_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cloudDocId",
+            "columnName": "cloud_doc_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "opType",
+            "columnName": "op_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expectedServerRevision",
+            "columnName": "expected_server_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetLocalRevision",
+            "columnName": "target_local_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isExplicitResave",
+            "columnName": "is_explicit_resave",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attemptCount",
+            "columnName": "attempt_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastErrorCategory",
+            "columnName": "last_error_category",
+            "affinity": "TEXT"
+          },
+          {
+            "fieldPath": "createdAtEpochMs",
+            "columnName": "created_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAtEpochMs",
+            "columnName": "updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "op_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_outbox_account_uid_status_created_at_ms",
+            "unique": false,
+            "columnNames": [
+              "account_uid",
+              "status",
+              "created_at_ms"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_outbox_account_uid_status_created_at_ms` ON `${TABLE_NAME}` (`account_uid`, `status`, `created_at_ms`)"
+          },
+          {
+            "name": "index_sync_outbox_account_uid_entity_type_local_entity_id",
+            "unique": false,
+            "columnNames": [
+              "account_uid",
+              "entity_type",
+              "local_entity_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_outbox_account_uid_entity_type_local_entity_id` ON `${TABLE_NAME}` (`account_uid`, `entity_type`, `local_entity_id`)"
+          }
+        ]
+      },
+      {
+        "tableName": "cloud_record_links",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`account_uid` TEXT NOT NULL, `entity_type` TEXT NOT NULL, `cloud_doc_id` TEXT NOT NULL, `local_entity_id` TEXT NOT NULL, `server_revision` INTEGER NOT NULL, `last_synced_local_revision` INTEGER NOT NULL, `server_deleted` INTEGER NOT NULL, `server_updated_at_ms` INTEGER NOT NULL, PRIMARY KEY(`account_uid`, `entity_type`, `cloud_doc_id`))",
+        "fields": [
+          {
+            "fieldPath": "accountUid",
+            "columnName": "account_uid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "entityType",
+            "columnName": "entity_type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cloudDocId",
+            "columnName": "cloud_doc_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localEntityId",
+            "columnName": "local_entity_id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverRevision",
+            "columnName": "server_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSyncedLocalRevision",
+            "columnName": "last_synced_local_revision",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverDeleted",
+            "columnName": "server_deleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "serverUpdatedAtMs",
+            "columnName": "server_updated_at_ms",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "account_uid",
+            "entity_type",
+            "cloud_doc_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_cloud_record_links_account_uid_entity_type_local_entity_id",
+            "unique": false,
+            "columnNames": [
+              "account_uid",
+              "entity_type",
+              "local_entity_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_cloud_record_links_account_uid_entity_type_local_entity_id` ON `${TABLE_NAME}` (`account_uid`, `entity_type`, `local_entity_id`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '411ed31b47c82ef33844366b39b68797')"
+    ]
+  }
+}

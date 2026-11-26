@@ -1,0 +1,33 @@
+name: Live Indexer Smoke Check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  live-indexer-smoke:
+    name: Scheduled / Manual Live Mirror Health Smoke
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Probe primary public indexer endpoints (non-blocking smoke telemetry)
+        shell: bash
+        run: |
+          check_endpoint() {
+            local name="$1"
+            local url="$2"
+            local code
+            code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 12 -A "MagnetVault-Smoke/2.0" "$url" || echo "000")
+            echo "${name} (${url}) -> HTTP ${code}"
+          }
+          check_endpoint "YTS" "https://yts.mx/api/v2/list_movies.json?query_term=ubuntu"
+          check_endpoint "EZTV" "https://eztvx.to/api/get-torrents?limit=5"
+          check_endpoint "TPB" "https://apibay.org/q.php?q=ubuntu"
+          check_endpoint "Nyaa" "https://nyaa.si/?page=rss&q=ubuntu"

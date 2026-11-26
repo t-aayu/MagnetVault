@@ -1,6 +1,7 @@
 package com.example.model
 
-import java.net.URLEncoder
+import com.example.domain.magnet.MagnetParser
+import com.example.domain.magnet.TorrentHashFamily
 import java.util.Locale
 
 enum class IndexerSource(
@@ -116,7 +117,19 @@ enum class SwarmHealth(val label: String) {
     HEALTHY("Healthy"),
     MODERATE("Moderate"),
     WEAK("Weak"),
-    DEAD("Dead")
+    DEAD("Dead"),
+    UNKNOWN("Unknown")
+}
+
+enum class AppAppearanceMode(val label: String) {
+    SYSTEM("System"),
+    OBSIDIAN("Obsidian"),
+    ALABASTER("Alabaster");
+
+    companion object {
+        fun fromNameSafe(raw: String): AppAppearanceMode =
+            entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: OBSIDIAN
+    }
 }
 
 data class TorrentResult(
@@ -134,7 +147,16 @@ data class TorrentResult(
     val infoHash: String,
     val detailPageUrl: String,
     val qualityTags: List<QualityTag> = QualityAndHealthParser.extractQualityTags(title),
-    val swarmHealth: SwarmHealth = QualityAndHealthParser.computeSwarmHealth(seeders, leechers)
+    val swarmHealth: SwarmHealth = QualityAndHealthParser.computeSwarmHealth(seeders, leechers),
+    val listingId: String = id,
+    val knownSizeBytes: Long? = sizeBytes.takeIf { it > 0L },
+    val knownSeeders: Int? = null,
+    val knownLeechers: Int? = null,
+    val knownUploadEpochSeconds: Long? = uploadEpochSeconds.takeIf { it > 0L },
+    val canonicalHashHex: String = MagnetParser.normalizeHash(infoHash)?.canonicalHex
+        ?: MagnetParser.extractAnyCanonicalHex(magnetUri),
+    val canonicalHashFamily: TorrentHashFamily? = MagnetParser.normalizeHash(infoHash)?.family
+        ?: MagnetParser.extractVerifiedIdentities(magnetUri).firstOrNull()?.family
 )
 
 data class IndexerSearchStatus(
@@ -143,7 +165,17 @@ data class IndexerSearchStatus(
     val isLoading: Boolean = false,
     val resultCount: Int = 0,
     val errorMessage: String? = null,
-    val webSearchUrl: String = ""
+    val webSearchUrl: String = "",
+    val terminalState: ProviderTerminalState = when {
+        isLoading -> ProviderTerminalState.LOADING
+        errorMessage != null -> ProviderTerminalState.NETWORK_ERROR
+        resultCount > 0 -> ProviderTerminalState.MATCHES
+        else -> ProviderTerminalState.ZERO_MATCHES
+    },
+    val httpStatusCode: Int? = null,
+    val retryAfterSeconds: Long? = null,
+    val elapsedMs: Long? = null,
+    val isRetrying: Boolean = false
 )
 
 enum class WebsiteOpenMode(val label: String) {
@@ -170,27 +202,25 @@ data class MirrorConfig(
     val activeMirrorUrl: String = provider.defaultMirrors.first()
 )
 
+enum class ParserCheckStatus(val label: String) {
+    NEVER_RUN("Parser: Never run"),
+    VERIFIED("Parser: Verified"),
+    FAILED("Parser: Failed")
+}
+
 data class MirrorHealthResult(
     val url: String,
     val isChecking: Boolean = false,
     val isReachable: Boolean? = null,
     val latencyMs: Long? = null,
     val statusCode: Int? = null,
-    val error: String? = null
+    val error: String? = null,
+    val checkedAtEpochMs: Long? = null,
+    val parserStatus: ParserCheckStatus = ParserCheckStatus.NEVER_RUN,
+    val parserDetail: String? = null
 )
 
 object QualityAndHealthParser {
-    private val defaultTrackers = listOf(
-        "udp://tracker.opentrackr.org:1337/announce",
-        "udp://open.stealth.si:80/announce",
-        "udp://tracker.torrent.eu.org:451/announce",
-        "udp://tracker.bittor.pw:1337/announce",
-        "udp://public.popcorn-tracker.org:6969/announce",
-        "udp://tracker.dler.org:6969/announce",
-        "udp://exodus.desync.com:6969/announce",
-        "udp://open.demonii.com:1337/announce"
-    )
-
     fun extractQualityTags(title: String): List<QualityTag> {
         val upper = title.uppercase(Locale.US)
         val tags = mutableListOf<QualityTag>()
@@ -215,38 +245,29 @@ object QualityAndHealthParser {
         return tags
     }
 
-    fun computeSwarmHealth(seeders: Int, leechers: Int): SwarmHealth {
-        if (seeders <= 0) return SwarmHealth.DEAD
-        val ratio = seeders.toFloat() / (leechers.coerceAtLeast(1)).toFloat()
+    fun computeSwarmHealth(seeders: Int, leechers: Int): SwarmHealth =
+        computeSwarmHealth(knownSeeders = seeders, knownLeechers = leechers)
+
+    fun computeSwarmHealth(knownSeeders: Int?, knownLeechers: Int?): SwarmHealth {
+        if (knownSeeders == null) return SwarmHealth.UNKNOWN
+        if (knownSeeders <= 0) return SwarmHealth.DEAD
+        val ratio = knownSeeders.toFloat() / ((knownLeechers ?: 0).coerceAtLeast(1)).toFloat()
         return when {
-            seeders >= 40 || (seeders >= 15 && ratio >= 1.2f) -> SwarmHealth.HEALTHY
-            seeders >= 8 || (seeders >= 4 && ratio >= 0.7f) -> SwarmHealth.MODERATE
+            knownSeeders >= 40 || (knownSeeders >= 15 && ratio >= 1.2f) -> SwarmHealth.HEALTHY
+            knownSeeders >= 8 || (knownSeeders >= 4 && ratio >= 0.7f) -> SwarmHealth.MODERATE
             else -> SwarmHealth.WEAK
         }
     }
 
-    fun buildMagnetFromHash(infoHash: String, title: String): String {
-        val cleanHash = infoHash.trim().lowercase(Locale.US)
-        if (cleanHash.isBlank()) return ""
-        val encodedName = try {
-            URLEncoder.encode(title.take(160), "UTF-8")
-        } catch (_: Exception) {
-            "torrent"
-        }
-        val trackers = defaultTrackers.joinToString("") { tracker ->
-            "&tr=${URLEncoder.encode(tracker, "UTF-8")}"
-        }
-        return "magnet:?xt=urn:btih:$cleanHash&dn=$encodedName$trackers"
-    }
+    fun buildMagnetFromHash(infoHash: String, title: String): String =
+        MagnetParser.buildMagnetFromHash(infoHash, title)
 
-    fun extractHashFromMagnet(magnetUri: String?): String {
-        if (magnetUri.isNullOrBlank()) return ""
-        val regex = Regex("xt=urn:btih:([a-zA-Z0-9]{32,40})", RegexOption.IGNORE_CASE)
-        return regex.find(magnetUri)?.groupValues?.getOrNull(1)?.lowercase(Locale.US) ?: ""
-    }
+    fun extractHashFromMagnet(magnetUri: String?): String =
+        MagnetParser.extractAnyCanonicalHex(magnetUri)
 
     fun formatBytes(bytes: Long): String {
-        if (bytes <= 0L) return "—"
+        if (bytes < 0L) return "Unknown"
+        if (bytes == 0L) return "Unknown"
         val kb = 1024.0
         val mb = kb * 1024.0
         val gb = mb * 1024.0
@@ -260,11 +281,20 @@ object QualityAndHealthParser {
         }
     }
 
-    fun parseSizeToBytes(sizeText: String): Long {
+    fun formatKnownBytes(knownBytes: Long?): String {
+        if (knownBytes == null) return "Unknown"
+        if (knownBytes == 0L) return "0 B"
+        return formatBytes(knownBytes)
+    }
+
+    fun parseSizeToKnownBytes(sizeText: String): Long? {
         val cleaned = sizeText.trim().uppercase(Locale.US).replace(",", "")
+        if (cleaned.isBlank() || cleaned == "—" || cleaned == "-" || cleaned == "N/A" || cleaned == "UNKNOWN") {
+            return null
+        }
         val match = Regex("([0-9]+(?:\\.[0-9]+)?)\\s*(TB|TIB|GB|GIB|MB|MIB|KB|KIB|B)").find(cleaned)
-            ?: return 0L
-        val value = match.groupValues[1].toDoubleOrNull() ?: return 0L
+            ?: return null
+        val value = match.groupValues[1].toDoubleOrNull() ?: return null
         val unit = match.groupValues[2]
         val multiplier = when (unit) {
             "TB", "TIB" -> 1024.0 * 1024.0 * 1024.0 * 1024.0
@@ -275,6 +305,9 @@ object QualityAndHealthParser {
         }
         return (value * multiplier).toLong().coerceAtLeast(0L)
     }
+
+    fun parseSizeToBytes(sizeText: String): Long =
+        parseSizeToKnownBytes(sizeText) ?: 0L
 
     fun sanitizeDocumentId(raw: String): String {
         val cleaned = raw.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")

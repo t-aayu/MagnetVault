@@ -19,25 +19,35 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Cancel
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.RemoveCircleOutline
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.WarningAmber
 import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Storage
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -46,50 +56,71 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.R
+import com.example.model.CanonicalReleaseGroup
 import com.example.model.IndexerSearchStatus
 import com.example.model.IndexerSource
+import com.example.model.ProviderTerminalState
 import com.example.model.QualityTag
+import com.example.model.SearchFilterState
+import com.example.model.SortOption
 import com.example.model.SwarmHealth
+import com.example.model.TorrentCategory
 import com.example.model.TorrentResult
 import com.example.model.WebsiteOpenMode
+import com.example.ui.theme.GlassCard
 import com.example.ui.theme.LocalTelemetryColors
 import com.example.ui.theme.TelemetryMonoStyle
 
 @Composable
 fun SwarmHealthBadge(health: SwarmHealth, modifier: Modifier = Modifier) {
     val telemetry = LocalTelemetryColors.current
-    val (bg, fg) = when (health) {
-        SwarmHealth.HEALTHY -> telemetry.seederGreenContainer to telemetry.seederGreen
-        SwarmHealth.MODERATE -> telemetry.leecherAmberContainer to telemetry.leecherAmber
-        SwarmHealth.WEAK -> telemetry.leecherAmberContainer.copy(alpha = 0.7f) to telemetry.leecherAmber
-        SwarmHealth.DEAD -> telemetry.deadRoseContainer to telemetry.deadRose
+    val (bg, fg, icon) = when (health) {
+        SwarmHealth.HEALTHY -> Triple(telemetry.seederGreenContainer, telemetry.seederGreen, Icons.Filled.CheckCircle)
+        SwarmHealth.MODERATE -> Triple(telemetry.leecherAmberContainer, telemetry.leecherAmber, Icons.Filled.Speed)
+        SwarmHealth.WEAK -> Triple(telemetry.leecherAmberContainer, telemetry.leecherAmber, Icons.Filled.WarningAmber)
+        SwarmHealth.DEAD -> Triple(telemetry.deadRoseContainer, telemetry.deadRose, Icons.Filled.Cancel)
+        SwarmHealth.UNKNOWN -> Triple(
+            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.onSurfaceVariant,
+            Icons.Filled.HelpOutline
+        )
     }
     Surface(
         color = bg,
         shape = RoundedCornerShape(6.dp),
+        border = BorderStroke(0.75.dp, fg.copy(alpha = 0.28f)),
         modifier = modifier
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(fg)
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(11.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
@@ -105,16 +136,17 @@ fun SwarmHealthBadge(health: SwarmHealth, modifier: Modifier = Modifier) {
 @Composable
 fun SourcePill(source: IndexerSource, modifier: Modifier = Modifier) {
     Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = MaterialTheme.colorScheme.tertiaryContainer,
         shape = RoundedCornerShape(6.dp),
+        border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.28f)),
         modifier = modifier
     ) {
         Text(
             text = source.shortBadge,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+            color = MaterialTheme.colorScheme.onTertiaryContainer,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.5.dp)
         )
     }
 }
@@ -125,15 +157,187 @@ fun QualityBadge(tag: QualityTag, modifier: Modifier = Modifier) {
     Surface(
         color = telemetry.qualityPurpleContainer,
         shape = RoundedCornerShape(6.dp),
+        border = BorderStroke(0.75.dp, telemetry.qualityPurple.copy(alpha = 0.28f)),
         modifier = modifier
     ) {
         Text(
             text = tag.label,
             style = MaterialTheme.typography.labelSmall,
             color = telemetry.qualityPurple,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.5.dp)
         )
+    }
+}
+
+/**
+ * Compact, high-density canonical release row for Search results:
+ * shows title, size, seeders, age, and source(s) while keeping unknown values distinct from zero.
+ */
+@Composable
+fun ReleaseGroupRow(
+    group: CanonicalReleaseGroup,
+    isSelected: Boolean,
+    isBookmarked: Boolean,
+    onClick: () -> Unit,
+    onToggleSave: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val telemetry = LocalTelemetryColors.current
+    val extraSources = (group.sources.size - 1).coerceAtLeast(0)
+    val seedersText = group.knownSeeders?.toString() ?: "Unknown"
+    val leechersText = group.knownLeechers?.toString() ?: "Unknown"
+    val borderColor = if (isSelected) MaterialTheme.colorScheme.primary else telemetry.cardBorder
+    val containerColor = if (isSelected) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.32f)
+    } else {
+        telemetry.glassSurface
+    }
+
+    val accessibilitySummary = buildString {
+        append(group.title)
+        append(", source ")
+        append(group.sources.joinToString(", ") { it.displayName })
+        append(", size ")
+        append(group.sizeLabel)
+        append(", seeders ")
+        append(seedersText)
+        append(", age ")
+        append(group.uploadDateLabel)
+        append(", swarm ")
+        append(group.swarmHealth.label)
+    }
+
+    Surface(
+        color = containerColor,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(if (isSelected) 1.5.dp else 1.dp, borderColor),
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 72.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = false) {
+                contentDescription = accessibilitySummary
+            }
+            .testTag("release_row_${group.groupKey}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 4.dp, top = 11.dp, bottom = 11.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = group.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                // Metrics line: Seeders | Size | Age | Source (+N)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    SourcePill(group.primarySource)
+                    if (extraSources > 0) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text(
+                                text = "+$extraSources",
+                                style = TelemetryMonoStyle.copy(fontWeight = FontWeight.SemiBold),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowUpward,
+                            contentDescription = "Seeders",
+                            tint = if (group.knownSeeders != null && group.knownSeeders!! > 0) {
+                                telemetry.seederGreen
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(
+                            text = seedersText,
+                            style = TelemetryMonoStyle.copy(fontWeight = FontWeight.SemiBold),
+                            color = if (group.knownSeeders != null && group.knownSeeders!! > 0) {
+                                telemetry.seederGreen
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            maxLines = 1
+                        )
+                    }
+
+                    Text(
+                        text = group.sizeLabel,
+                        style = TelemetryMonoStyle,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+
+                    Text(
+                        text = group.uploadDateLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
+                    )
+                }
+
+                if (group.qualityTags.isNotEmpty() || group.swarmHealth == SwarmHealth.DEAD || group.knownLeechers != null) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        SwarmHealthBadge(group.swarmHealth)
+                        group.qualityTags.take(3).forEach { tag ->
+                            QualityBadge(tag)
+                        }
+                        if (group.knownLeechers != null) {
+                            Text(
+                                text = "L:$leechersText",
+                                style = TelemetryMonoStyle,
+                                color = telemetry.leecherAmber,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+
+            IconButton(
+                onClick = onToggleSave,
+                modifier = Modifier
+                    .size(48.dp)
+                    .testTag("row_save_${group.groupKey}")
+            ) {
+                Icon(
+                    imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
+                    contentDescription = if (isBookmarked) "Remove saved release" else "Save release",
+                    tint = if (isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(21.dp)
+                )
+            }
+        }
     }
 }
 
@@ -141,6 +345,7 @@ fun QualityBadge(tag: QualityTag, modifier: Modifier = Modifier) {
 fun ProviderStatusStrip(
     statuses: List<IndexerSearchStatus>,
     onStatusClick: (IndexerSearchStatus) -> Unit = {},
+    onOpenDiagnostics: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val telemetry = LocalTelemetryColors.current
@@ -150,47 +355,78 @@ fun ProviderStatusStrip(
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        statuses.forEach { st ->
-            val borderColor = when {
-                st.isLoading -> MaterialTheme.colorScheme.primary
-                st.errorMessage != null -> telemetry.deadRose
-                st.resultCount > 0 -> telemetry.seederGreen
-                else -> telemetry.cardBorder
-            }
+        if (onOpenDiagnostics != null) {
             Surface(
-                color = MaterialTheme.colorScheme.surface,
+                color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(10.dp),
-                border = BorderStroke(1.dp, borderColor.copy(alpha = 0.7f)),
+                border = BorderStroke(1.dp, telemetry.cardBorder),
                 modifier = Modifier
+                    .heightIn(min = 48.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(onClick = onOpenDiagnostics)
+                    .testTag("open_sources_diagnostics_button")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Text(
+                        text = stringResource(R.string.action_sources),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        }
+
+        statuses.forEach { st ->
+            val (accentColor, statusIcon, shortValue) = when (st.terminalState) {
+                ProviderTerminalState.LOADING -> Triple(MaterialTheme.colorScheme.primary, null, "…")
+                ProviderTerminalState.MATCHES -> Triple(telemetry.seederGreen, Icons.Filled.CheckCircle, st.resultCount.toString())
+                ProviderTerminalState.ZERO_MATCHES -> Triple(MaterialTheme.colorScheme.onSurfaceVariant, Icons.Filled.RemoveCircleOutline, "0")
+                ProviderTerminalState.TIMEOUT -> Triple(telemetry.leecherAmber, Icons.Filled.Schedule, "Timeout")
+                ProviderTerminalState.RATE_LIMITED -> Triple(telemetry.leecherAmber, Icons.Filled.HourglassTop, "429")
+                ProviderTerminalState.PARSER_ERROR -> Triple(telemetry.deadRose, Icons.Filled.ErrorOutline, "Parse")
+                ProviderTerminalState.NETWORK_ERROR -> Triple(telemetry.deadRose, Icons.Filled.ErrorOutline, "Err")
+                ProviderTerminalState.DISABLED -> Triple(telemetry.disabledText, Icons.Filled.Block, "Off")
+                ProviderTerminalState.UNSUPPORTED_CATEGORY -> Triple(telemetry.disabledText, Icons.Filled.RemoveCircleOutline, "N/A")
+            }
+
+            Surface(
+                color = telemetry.glassSurface,
+                shape = RoundedCornerShape(10.dp),
+                border = BorderStroke(1.dp, accentColor.copy(alpha = 0.5f)),
+                modifier = Modifier
+                    .heightIn(min = 48.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .clickable { onStatusClick(st) }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "${st.source.displayName}: ${st.terminalState.label}, ${st.resultCount} results"
+                    }
                     .testTag("provider_status_${st.source.name}")
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
                     if (st.isLoading) {
                         CircularProgressIndicator(
                             modifier = Modifier.size(12.dp),
-                            strokeWidth = 1.8.dp,
+                            strokeWidth = 1.6.dp,
                             color = MaterialTheme.colorScheme.primary
                         )
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .size(7.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when {
-                                        st.errorMessage != null -> telemetry.deadRose
-                                        st.resultCount > 0 -> telemetry.seederGreen
-                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
-                                    }
-                                )
+                    } else if (statusIcon != null) {
+                        Icon(
+                            imageVector = statusIcon,
+                            contentDescription = null,
+                            tint = accentColor,
+                            modifier = Modifier.size(13.dp)
                         )
                     }
                     Text(
@@ -200,20 +436,476 @@ fun ProviderStatusStrip(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = when {
-                            st.isLoading -> "…"
-                            st.errorMessage != null -> "Err"
-                            else -> st.resultCount.toString()
-                        },
+                        text = shortValue,
                         style = TelemetryMonoStyle,
-                        color = if (st.errorMessage != null) telemetry.deadRose else MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (st.terminalState.isFailure) accentColor else MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                        contentDescription = "Open ${st.source.displayName} search results",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.size(11.dp)
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun SearchFilterSortSheet(
+    currentFilters: SearchFilterState,
+    onApply: (SearchFilterState) -> Unit,
+    onReset: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val telemetry = LocalTelemetryColors.current
+
+    var draftCategory by remember(currentFilters) { mutableStateOf(currentFilters.category) }
+    var draftSort by remember(currentFilters) { mutableStateOf(currentFilters.sort) }
+    var draftQualities by remember(currentFilters) { mutableStateOf(currentFilters.qualities) }
+    var draftSources by remember(currentFilters) { mutableStateOf(currentFilters.selectedSources) }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = telemetry.cardBorder) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+                .testTag("search_filter_sheet")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Filter & Sort",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                TextButton(
+                    onClick = {
+                        onReset()
+                        onDismiss()
+                    },
+                    modifier = Modifier
+                        .heightIn(min = 48.dp)
+                        .testTag("filter_sheet_reset_button")
+                ) {
+                    Text(stringResource(R.string.action_reset))
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            Text(
+                text = "SORT BY (LOCAL)",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                SortOption.entries.forEach { sort ->
+                    val selected = draftSort == sort
+                    FilterChip(
+                        selected = selected,
+                        onClick = { draftSort = sort },
+                        label = { Text(sort.label) },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("filter_sort_${sort.name}")
                     )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "CATEGORY",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                TorrentCategory.entries.forEach { cat ->
+                    val selected = draftCategory == cat
+                    FilterChip(
+                        selected = selected,
+                        onClick = { draftCategory = cat },
+                        label = { Text(cat.label) },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("filter_category_${cat.name}")
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "QUALITY",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                QualityTag.entries.forEach { tag ->
+                    val selected = tag in draftQualities
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            draftQualities = if (selected) draftQualities - tag else draftQualities + tag
+                        },
+                        label = { Text(tag.label) },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = telemetry.qualityPurpleContainer,
+                            selectedLabelColor = telemetry.qualityPurple
+                        ),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("filter_quality_${tag.name}")
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            Text(
+                text = "SOURCES",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                IndexerSource.entries.forEach { src ->
+                    val selected = src in draftSources
+                    FilterChip(
+                        selected = selected,
+                        onClick = {
+                            draftSources = if (selected) draftSources - src else draftSources + src
+                        },
+                        label = { Text(src.displayName) },
+                        shape = RoundedCornerShape(10.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer
+                        ),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("filter_source_${src.name}")
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(18.dp))
+
+            Button(
+                onClick = {
+                    onApply(
+                        SearchFilterState(
+                            category = draftCategory,
+                            sort = draftSort,
+                            qualities = draftQualities,
+                            selectedSources = draftSources
+                        )
+                    )
+                    onDismiss()
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 50.dp)
+                    .testTag("filter_sheet_apply_button")
+            ) {
+                Text("Apply Filters", fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SourceDiagnosticsSheet(
+    statuses: List<IndexerSearchStatus>,
+    openMode: WebsiteOpenMode,
+    onRetrySource: (IndexerSource) -> Unit,
+    onOpenSourceSite: (IndexerSearchStatus) -> Unit,
+    onOpenSettings: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val telemetry = LocalTelemetryColors.current
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = telemetry.cardBorder) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+                .testTag("sources_diagnostics_sheet")
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Source Status & Diagnostics",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                TextButton(
+                    onClick = {
+                        onDismiss()
+                        onOpenSettings()
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("Mirrors")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                statuses.forEach { st ->
+                    GlassCard(
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("diagnostic_row_${st.source.name}")
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                SourcePill(st.source)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = st.terminalState.label,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = when {
+                                        st.terminalState == ProviderTerminalState.MATCHES -> telemetry.seederGreen
+                                        st.terminalState.isFailure -> telemetry.deadRose
+                                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    text = buildString {
+                                        append("${st.resultCount} items")
+                                        if (st.elapsedMs != null) {
+                                            append(" • ${st.elapsedMs}ms")
+                                        }
+                                    },
+                                    style = TelemetryMonoStyle,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            if (st.mirrorUsed.isNotBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = st.mirrorUsed.removePrefix("https://").removePrefix("http://"),
+                                    style = TelemetryMonoStyle,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+
+                            if (!st.errorMessage.isNullOrBlank()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = st.errorMessage,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = telemetry.deadRose
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                if (st.terminalState != ProviderTerminalState.DISABLED &&
+                                    st.terminalState != ProviderTerminalState.UNSUPPORTED_CATEGORY
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { onRetrySource(st.source) },
+                                        enabled = !st.isLoading && !st.isRetrying,
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .heightIn(min = 48.dp)
+                                            .testTag("retry_source_${st.source.name}")
+                                    ) {
+                                        if (st.isLoading || st.isRetrying) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(14.dp),
+                                                strokeWidth = 2.dp
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("Retrying…")
+                                        } else {
+                                            Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(stringResource(R.string.action_retry))
+                                        }
+                                    }
+                                }
+
+                                val webTarget = st.webSearchUrl.ifBlank { st.mirrorUsed }
+                                if (webTarget.isNotBlank()) {
+                                    OutlinedButton(
+                                        onClick = {
+                                            onDismiss()
+                                            onOpenSourceSite(st)
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .heightIn(min = 48.dp)
+                                            .testTag("open_source_html_${st.source.name}")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (openMode == WebsiteOpenMode.IN_APP) {
+                                                Icons.Outlined.Public
+                                            } else {
+                                                Icons.AutoMirrored.Filled.OpenInNew
+                                            },
+                                            contentDescription = null,
+                                            modifier = Modifier.size(15.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Open HTML")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SearchStatusMessageCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    iconTint: Color = MaterialTheme.colorScheme.primary,
+    primaryActionLabel: String? = null,
+    onPrimaryAction: (() -> Unit)? = null,
+    secondaryActionLabel: String? = null,
+    onSecondaryAction: (() -> Unit)? = null,
+    testTag: String = "search_status_card",
+    modifier: Modifier = Modifier
+) {
+    GlassCard(
+        shape = RoundedCornerShape(14.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag(testTag)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(32.dp)
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            if (primaryActionLabel != null && onPrimaryAction != null) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = onPrimaryAction,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .heightIn(min = 48.dp)
+                            .testTag("${testTag}_primary_action")
+                    ) {
+                        Text(primaryActionLabel)
+                    }
+                    if (secondaryActionLabel != null && onSecondaryAction != null) {
+                        OutlinedButton(
+                            onClick = onSecondaryAction,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("${testTag}_secondary_action")
+                        ) {
+                            Text(secondaryActionLabel)
+                        }
+                    }
                 }
             }
         }
@@ -224,16 +916,16 @@ fun ProviderStatusStrip(
 fun IndexerErrorFallbackBanner(
     failedStatuses: List<IndexerSearchStatus>,
     openMode: WebsiteOpenMode,
+    onRetrySource: (IndexerSource) -> Unit,
     onOpenSite: (IndexerSearchStatus) -> Unit,
-    onChangeModeSettings: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val telemetry = LocalTelemetryColors.current
     if (failedStatuses.isEmpty()) return
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
+    GlassCard(
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(1.dp, telemetry.deadRose.copy(alpha = 0.55f)),
+        border = BorderStroke(1.dp, telemetry.deadRose.copy(alpha = 0.45f)),
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 4.dp)
@@ -246,30 +938,25 @@ fun IndexerErrorFallbackBanner(
             ) {
                 Icon(
                     imageVector = Icons.Filled.ErrorOutline,
-                    contentDescription = null,
+                    contentDescription = "Source failure",
                     tint = telemetry.deadRose,
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Site error — open HTML page (${openMode.label})",
+                    text = "${failedStatuses.size} source${if (failedStatuses.size == 1) "" else "s"} failed — retry or open HTML (${openMode.label})",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = "Settings",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .clickable(onClick = onChangeModeSettings)
-                        .padding(horizontal = 6.dp, vertical = 4.dp)
-                )
+                TextButton(
+                    onClick = onOpenDiagnostics,
+                    modifier = Modifier.heightIn(min = 48.dp)
+                ) {
+                    Text("Details")
+                }
             }
-            Spacer(modifier = Modifier.height(8.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -277,35 +964,37 @@ fun IndexerErrorFallbackBanner(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 failedStatuses.forEach { st ->
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                    OutlinedButton(
+                        onClick = { onRetrySource(st.source) },
+                        enabled = !st.isLoading && !st.isRetrying,
                         shape = RoundedCornerShape(10.dp),
                         modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onOpenSite(st) }
-                            .testTag("open_failed_site_${st.source.name}")
+                            .heightIn(min = 48.dp)
+                            .testTag("banner_retry_${st.source.name}")
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("Retry ${st.source.shortBadge}")
+                    }
+                    if (st.webSearchUrl.isNotBlank()) {
+                        OutlinedButton(
+                            onClick = { onOpenSite(st) },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier
+                                .heightIn(min = 48.dp)
+                                .testTag("open_failed_site_${st.source.name}")
                         ) {
                             Icon(
                                 imageVector = if (openMode == WebsiteOpenMode.IN_APP) {
-                                    Icons.Filled.Public
+                                    Icons.Outlined.Public
                                 } else {
                                     Icons.AutoMirrored.Filled.OpenInNew
                                 },
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(14.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = "Open ${st.source.displayName}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text(st.source.shortBadge)
                         }
                     }
                 }
@@ -314,6 +1003,9 @@ fun IndexerErrorFallbackBanner(
     }
 }
 
+/**
+ * Retained for existing VaultScreen bookmarks display (Phase 2 owns Vault redesign).
+ */
 @Composable
 fun TorrentResultCard(
     torrent: TorrentResult,
@@ -327,17 +1019,15 @@ fun TorrentResultCard(
     modifier: Modifier = Modifier
 ) {
     val telemetry = LocalTelemetryColors.current
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, telemetry.cardBorder),
+    GlassCard(
+        shape = RoundedCornerShape(14.dp),
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
             .testTag("torrent_card_${torrent.id}")
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -366,7 +1056,7 @@ fun TorrentResultCard(
                 overflow = TextOverflow.Ellipsis
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(9.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -376,14 +1066,14 @@ fun TorrentResultCard(
                     imageVector = Icons.Filled.ArrowUpward,
                     contentDescription = "Seeders",
                     tint = telemetry.seederGreen,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(13.dp)
                 )
                 Spacer(modifier = Modifier.width(2.dp))
                 Text(
-                    text = torrent.seeders.toString(),
+                    text = (torrent.knownSeeders ?: torrent.seeders).toString(),
                     style = TelemetryMonoStyle,
                     color = telemetry.seederGreen,
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.SemiBold
                 )
 
                 Spacer(modifier = Modifier.width(12.dp))
@@ -392,11 +1082,11 @@ fun TorrentResultCard(
                     imageVector = Icons.Filled.ArrowDownward,
                     contentDescription = "Leechers",
                     tint = telemetry.leecherAmber,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(13.dp)
                 )
                 Spacer(modifier = Modifier.width(2.dp))
                 Text(
-                    text = torrent.leechers.toString(),
+                    text = (torrent.knownLeechers ?: torrent.leechers).toString(),
                     style = TelemetryMonoStyle,
                     color = telemetry.leecherAmber
                 )
@@ -404,16 +1094,16 @@ fun TorrentResultCard(
                 Spacer(modifier = Modifier.width(12.dp))
 
                 Icon(
-                    imageVector = Icons.Filled.Storage,
+                    imageVector = Icons.Outlined.Storage,
                     contentDescription = "Size",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(13.dp)
+                    modifier = Modifier.size(12.dp)
                 )
                 Spacer(modifier = Modifier.width(3.dp))
                 Text(
                     text = torrent.sizeLabel,
                     style = TelemetryMonoStyle,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
                 )
 
                 Spacer(modifier = Modifier.weight(1f))
@@ -427,8 +1117,11 @@ fun TorrentResultCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-            HorizontalDivider(color = telemetry.cardBorder.copy(alpha = 0.6f))
+            Spacer(modifier = Modifier.height(9.dp))
+            HorizontalDivider(
+                thickness = 0.75.dp,
+                color = telemetry.cardBorder.copy(alpha = 0.5f)
+            )
             Spacer(modifier = Modifier.height(6.dp))
 
             Row(
@@ -436,24 +1129,24 @@ fun TorrentResultCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Quick Copy Magnet Pill
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                    color = MaterialTheme.colorScheme.primaryContainer,
                     shape = RoundedCornerShape(10.dp),
+                    border = BorderStroke(0.75.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
                     modifier = Modifier
-                        .heightIn(min = 40.dp)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .clickable(enabled = !isResolvingAction, onClick = onCopyMagnet)
                         .testTag("card_copy_magnet_${torrent.id}")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 9.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         if (isResolvingAction) {
                             CircularProgressIndicator(
-                                modifier = Modifier.size(14.dp),
-                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(13.dp),
+                                strokeWidth = 1.8.dp,
                                 color = MaterialTheme.colorScheme.primary
                             )
                         } else {
@@ -461,77 +1154,61 @@ fun TorrentResultCard(
                                 imageVector = Icons.Filled.ContentCopy,
                                 contentDescription = "Copy magnet link",
                                 tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                         }
                         Spacer(modifier = Modifier.width(5.dp))
                         Text(
                             text = if (isResolvingAction) "Fetching…" else "Magnet",
                             style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.Bold
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
 
-                // Quick Seedr.cc Browser Pill
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, telemetry.cardBorder),
+                    border = BorderStroke(0.75.dp, telemetry.cardBorder),
                     modifier = Modifier
-                        .heightIn(min = 40.dp)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .clickable(enabled = !isResolvingAction, onClick = onOpenSeedr)
                         .testTag("card_open_seedr_${torrent.id}")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 9.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "Seedr",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                            contentDescription = "Copy magnet and open Seedr in browser",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(13.dp)
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
 
-                // Quick TorBox Browser Pill
                 Surface(
                     color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(10.dp),
-                    border = BorderStroke(1.dp, telemetry.cardBorder),
+                    border = BorderStroke(0.75.dp, telemetry.cardBorder),
                     modifier = Modifier
-                        .heightIn(min = 40.dp)
+                        .heightIn(min = 48.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .clickable(enabled = !isResolvingAction, onClick = onOpenTorBox)
                         .testTag("card_open_torbox_${torrent.id}")
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 9.dp),
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = "TorBox",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
-                            contentDescription = "Copy magnet and open TorBox in browser",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(13.dp)
+                            fontWeight = FontWeight.Medium
                         )
                     }
                 }
@@ -545,329 +1222,11 @@ fun TorrentResultCard(
                     Icon(
                         imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                         contentDescription = if (isBookmarked) "Remove bookmark" else "Bookmark torrent",
-                        tint = if (isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = if (isBookmarked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
         }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun TorrentDetailBottomSheet(
-    torrent: TorrentResult,
-    isBookmarked: Boolean,
-    isResolvingMagnet: Boolean,
-    magnetResolveError: String?,
-    onDismiss: () -> Unit,
-    onRetryResolveMagnet: () -> Unit,
-    onCopyMagnet: (String) -> Unit,
-    onOpenSeedrBrowser: (String?) -> Unit,
-    onOpenTorBoxBrowser: (String?) -> Unit,
-    onOpenLocalTorrentApp: (String) -> Unit,
-    onOpenWebsitePage: ((String) -> Unit)? = null,
-    onShareMagnet: (String) -> Unit,
-    onToggleBookmark: () -> Unit,
-    torrentBoxOpenMode: WebsiteOpenMode = WebsiteOpenMode.IN_APP
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val telemetry = LocalTelemetryColors.current
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.onSurface
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 24.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SourcePill(torrent.source)
-                SwarmHealthBadge(torrent.swarmHealth)
-                torrent.qualityTags.forEach { QualityBadge(it) }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = torrent.title,
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(14.dp),
-                border = BorderStroke(1.dp, telemetry.cardBorder),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    StatColumn("SEEDERS", torrent.seeders.toString(), telemetry.seederGreen)
-                    StatColumn("LEECHERS", torrent.leechers.toString(), telemetry.leecherAmber)
-                    StatColumn("SIZE", torrent.sizeLabel, MaterialTheme.colorScheme.onSurface)
-                    StatColumn("UPLOADED", torrent.uploadDateLabel, MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            when {
-                isResolvingMagnet -> {
-                    Surface(
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Text(
-                                text = "Extracting magnet link from ${torrent.source.displayName} mirrors…",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-                magnetResolveError != null -> {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Filled.ErrorOutline,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = magnetResolveError,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(
-                                onClick = onRetryResolveMagnet,
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(Icons.Filled.Refresh, contentDescription = "Retry magnet extraction")
-                            }
-                        }
-                    }
-                }
-                torrent.infoHash.isNotBlank() -> {
-                    Text(
-                        text = "INFO HASH • ${torrent.infoHash.uppercase()}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            val readyMagnet = torrent.magnetUri
-
-            // Primary Action: Copy Magnet Link
-            Button(
-                onClick = { readyMagnet?.let(onCopyMagnet) },
-                enabled = !isResolvingMagnet && !readyMagnet.isNullOrBlank(),
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .testTag("copy_magnet_button")
-            ) {
-                Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = stringResource(R.string.action_copy_magnet),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Open Seedr.cc & TorBox in App or Default Browser (copies magnet first)
-            Text(
-                text = if (torrentBoxOpenMode == WebsiteOpenMode.IN_APP) {
-                    "OPEN IN APP (COPIES MAGNET FIRST)"
-                } else {
-                    "OPEN IN BROWSER (COPIES MAGNET FIRST)"
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                FilledTonalButton(
-                    onClick = { onOpenSeedrBrowser(readyMagnet) },
-                    enabled = !isResolvingMagnet,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("open_seedr_browser_button")
-                ) {
-                    Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.action_open_seedr),
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-
-                FilledTonalButton(
-                    onClick = { onOpenTorBoxBrowser(readyMagnet) },
-                    enabled = !isResolvingMagnet,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .testTag("open_torbox_browser_button")
-                ) {
-                    Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = stringResource(R.string.action_open_torbox),
-                        style = MaterialTheme.typography.labelLarge,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Text(
-                text = "MORE ACTIONS",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            FlowRow(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { readyMagnet?.let(onOpenLocalTorrentApp) },
-                    enabled = !readyMagnet.isNullOrBlank(),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .height(48.dp)
-                        .testTag("open_local_torrent_button")
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(stringResource(R.string.action_open_local))
-                }
-
-                if (onOpenWebsitePage != null && torrent.detailPageUrl.startsWith("http", ignoreCase = true)) {
-                    OutlinedButton(
-                        onClick = { onOpenWebsitePage(torrent.detailPageUrl) },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier
-                            .height(48.dp)
-                            .testTag("open_torrent_webpage_button")
-                    ) {
-                        Icon(Icons.Filled.Public, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(stringResource(R.string.action_open_website))
-                    }
-                }
-
-                OutlinedButton(
-                    onClick = { readyMagnet?.let(onShareMagnet) },
-                    enabled = !readyMagnet.isNullOrBlank(),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.height(48.dp)
-                ) {
-                    Icon(Icons.Filled.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(stringResource(R.string.action_share))
-                }
-
-                OutlinedButton(
-                    onClick = onToggleBookmark,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.height(48.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isBookmarked) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        if (isBookmarked) stringResource(R.string.action_bookmarked)
-                        else stringResource(R.string.action_bookmark)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun StatColumn(label: String, value: String, valueColor: Color) {
-    Column(horizontalAlignment = Alignment.Start) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(modifier = Modifier.height(2.dp))
-        Text(
-            text = value,
-            style = TelemetryMonoStyle.copy(fontWeight = FontWeight.Bold),
-            color = valueColor,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
     }
 }

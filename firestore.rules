@@ -42,6 +42,20 @@ service cloud.firestore {
              cat in ['ALL', 'MOVIES', 'TV', 'ANIME', 'GAMES', 'APPS', 'MUSIC', 'OTHER'];
     }
 
+    function isValidOptionalV2SyncFields(data) {
+      return (!('revision' in data) || (data.revision is int && data.revision >= 1)) &&
+             (!('deleted' in data) || (data.deleted is bool)) &&
+             (!('deletedAt' in data) || isValidTimestamp(data.deletedAt)) &&
+             (!('deleted' in data) || data.deleted == false || ('deletedAt' in data)) &&
+             (!('lastOpId' in data) || (data.lastOpId is string && data.lastOpId.size() >= 1 && data.lastOpId.size() <= 128));
+    }
+
+    function isValidMonotonicRevisionUpdate() {
+      return !('revision' in incoming()) ||
+             (!('revision' in existing()) && incoming().revision == 1) ||
+             (('revision' in existing()) && existing().revision is int && incoming().revision == existing().revision + 1);
+    }
+
     // --- ENTITY VALIDATION BLUEPRINTS ---
     function isValidBookmark(data, userId) {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId == userId &&
@@ -58,6 +72,9 @@ service cloud.firestore {
              data.detailPageUrl is string && data.detailPageUrl.size() <= 1000 &&
              data.qualityTags is list && data.qualityTags.size() <= 10 &&
              (data.qualityTags.size() == 0 || data.qualityTags[0] is string) &&
+             (!('canonicalIdentity' in data) || (data.canonicalIdentity is string && data.canonicalIdentity.size() <= 200)) &&
+             (!('legacyDocId' in data) || (data.legacyDocId is string && data.legacyDocId.size() <= 128)) &&
+             isValidOptionalV2SyncFields(data) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }
@@ -66,6 +83,7 @@ service cloud.firestore {
       return data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId == userId &&
              data.query is string && data.query.size() >= 1 && data.query.size() <= 200 &&
              isValidCategory(data.category) &&
+             isValidOptionalV2SyncFields(data) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }
@@ -77,13 +95,15 @@ service cloud.firestore {
              data.mirrors is list && data.mirrors.size() >= 1 && data.mirrors.size() <= 12 &&
              data.mirrors[0] is string &&
              data.activeMirrorUrl is string && data.activeMirrorUrl.size() >= 8 && data.activeMirrorUrl.size() <= 500 &&
+             (!('revision' in data) || (data.revision is int && data.revision >= 1)) &&
+             (!('lastOpId' in data) || (data.lastOpId is string && data.lastOpId.size() >= 1 && data.lastOpId.size() <= 128)) &&
              isValidTimestamp(data.createdAt) &&
              isValidTimestamp(data.updatedAt);
     }
 
     // --- COLLECTION RULES ---
     match /users/{userId} {
-      // User-scoped Bookmarks
+      // User-scoped Bookmarks (v1 + v2 tombstones & monotonic CAS revisions)
       match /bookmarks/{bookmarkId} {
         allow get: if isOwner(userId) && isValidId(bookmarkId);
         allow list: if isOwner(userId);
@@ -100,7 +120,9 @@ service cloud.firestore {
                            'userId', 'title', 'source', 'category', 'sizeLabel',
                            'sizeBytes', 'seeders', 'leechers', 'uploadDateLabel',
                            'magnetUri', 'infoHash', 'detailPageUrl', 'qualityTags',
-                           'createdAt', 'updatedAt'
+                           'createdAt', 'updatedAt',
+                           'revision', 'deleted', 'deletedAt', 'lastOpId',
+                           'canonicalIdentity', 'legacyDocId'
                          ]) &&
                          isValidBookmark(incoming(), userId);
 
@@ -109,14 +131,17 @@ service cloud.firestore {
                          isValidBookmark(incoming(), userId) &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
+                         isValidMonotonicRevisionUpdate() &&
                          incoming().diff(existing()).affectedKeys().hasOnly([
-                           'magnetUri', 'seeders', 'leechers', 'sizeLabel', 'sizeBytes', 'updatedAt'
+                           'magnetUri', 'infoHash', 'seeders', 'leechers', 'sizeLabel', 'sizeBytes',
+                           'updatedAt', 'revision', 'deleted', 'deletedAt', 'lastOpId',
+                           'canonicalIdentity', 'legacyDocId'
                          ]);
 
         allow delete: if isOwner(userId) && isValidId(bookmarkId);
       }
 
-      // User-scoped Search History
+      // User-scoped Search History (v1 + v2 tombstones & monotonic CAS revisions)
       match /search_history/{entryId} {
         allow get: if isOwner(userId) && isValidId(entryId);
         allow list: if isOwner(userId);
@@ -124,7 +149,10 @@ service cloud.firestore {
         allow create: if isOwner(userId) &&
                          isValidId(entryId) &&
                          incoming().keys().hasAll(['userId', 'query', 'category', 'createdAt', 'updatedAt']) &&
-                         incoming().keys().hasOnly(['userId', 'query', 'category', 'createdAt', 'updatedAt']) &&
+                         incoming().keys().hasOnly([
+                           'userId', 'query', 'category', 'createdAt', 'updatedAt',
+                           'revision', 'deleted', 'deletedAt', 'lastOpId'
+                         ]) &&
                          isValidSearchHistory(incoming(), userId);
 
         allow update: if isOwner(userId) &&
@@ -132,12 +160,15 @@ service cloud.firestore {
                          isValidSearchHistory(incoming(), userId) &&
                          incoming().userId == existing().userId &&
                          incoming().createdAt == existing().createdAt &&
-                         incoming().diff(existing()).affectedKeys().hasOnly(['category', 'updatedAt']);
+                         isValidMonotonicRevisionUpdate() &&
+                         incoming().diff(existing()).affectedKeys().hasOnly([
+                           'category', 'updatedAt', 'revision', 'deleted', 'deletedAt', 'lastOpId'
+                         ]);
 
         allow delete: if isOwner(userId) && isValidId(entryId);
       }
 
-      // User-scoped Mirror Configurations
+      // User-scoped Mirror Configurations (v1 + v2 monotonic CAS revisions)
       match /mirror_configs/{providerId} {
         allow get: if isOwner(userId) && isValidId(providerId);
         allow list: if isOwner(userId);
@@ -149,7 +180,8 @@ service cloud.firestore {
                            'userId', 'provider', 'enabled', 'mirrors', 'activeMirrorUrl', 'createdAt', 'updatedAt'
                          ]) &&
                          incoming().keys().hasOnly([
-                           'userId', 'provider', 'enabled', 'mirrors', 'activeMirrorUrl', 'createdAt', 'updatedAt'
+                           'userId', 'provider', 'enabled', 'mirrors', 'activeMirrorUrl', 'createdAt', 'updatedAt',
+                           'revision', 'lastOpId'
                          ]) &&
                          isValidMirrorConfig(incoming(), userId);
 
@@ -159,8 +191,10 @@ service cloud.firestore {
                          incoming().userId == existing().userId &&
                          incoming().provider == existing().provider &&
                          incoming().createdAt == existing().createdAt &&
+                         isValidMonotonicRevisionUpdate() &&
                          incoming().diff(existing()).affectedKeys().hasOnly([
-                           'enabled', 'mirrors', 'activeMirrorUrl', 'updatedAt'
+                           'enabled', 'mirrors', 'activeMirrorUrl', 'updatedAt',
+                           'revision', 'lastOpId'
                          ]);
 
         allow delete: if isOwner(userId) && isValidId(providerId);

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.NetworkCheck
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Star
@@ -31,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -52,8 +55,12 @@ import com.example.R
 import com.example.model.IndexerSource
 import com.example.model.MirrorConfig
 import com.example.model.MirrorHealthResult
+import com.example.model.ParserCheckStatus
+import com.example.ui.theme.GlassCard
 import com.example.ui.theme.LocalTelemetryColors
 import com.example.ui.theme.TelemetryMonoStyle
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun MirrorManagerSection(
@@ -61,7 +68,8 @@ fun MirrorManagerSection(
     healthMap: Map<String, MirrorHealthResult>,
     isPingingAll: Boolean,
     onPingAll: () -> Unit,
-    onPingSingle: (String) -> Unit,
+    onPingSingle: (IndexerSource, String) -> Unit,
+    onVerifyParser: (IndexerSource, String) -> Unit,
     onToggleProvider: (IndexerSource, Boolean) -> Unit,
     onAddMirror: (IndexerSource, String) -> Unit,
     onRemoveMirror: (IndexerSource, String) -> Unit,
@@ -74,25 +82,11 @@ fun MirrorManagerSection(
     var newMirrorInput by remember { mutableStateOf("") }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "LIVE MIRRORS & HEALTH CHECKER",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Edit latest domains, ping latency & auto-failover (synced)",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+        Text(
+            text = "Manage provider domains, HTTP reachability checks, and parser schema verification.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -116,7 +110,7 @@ fun MirrorManagerSection(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Pinging…")
                 } else {
-                    Icon(Icons.Filled.NetworkCheck, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Filled.NetworkCheck, contentDescription = null, modifier = Modifier.size(17.dp))
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(stringResource(R.string.action_test_mirrors))
                 }
@@ -124,7 +118,10 @@ fun MirrorManagerSection(
             OutlinedButton(
                 onClick = onResetDefaults,
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.height(48.dp)
+                border = BorderStroke(1.dp, telemetry.cardBorder),
+                modifier = Modifier
+                    .height(48.dp)
+                    .testTag("reset_mirrors_button")
             ) {
                 Icon(Icons.Filled.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
@@ -134,11 +131,11 @@ fun MirrorManagerSection(
 
         IndexerSource.entries.forEach { source ->
             val cfg = mirrorConfigs[source] ?: MirrorConfig(provider = source)
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(16.dp),
-                border = BorderStroke(1.dp, telemetry.cardBorder),
-                modifier = Modifier.fillMaxWidth()
+            GlassCard(
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("mirror_source_card_${source.name}")
             ) {
                 Column(modifier = Modifier.padding(14.dp)) {
                     Row(
@@ -166,55 +163,130 @@ fun MirrorManagerSection(
                     }
 
                     Spacer(modifier = Modifier.height(8.dp))
-                    HorizontalDivider(color = telemetry.cardBorder.copy(alpha = 0.6f))
+                    HorizontalDivider(
+                        thickness = 0.75.dp,
+                        color = telemetry.cardBorder.copy(alpha = 0.5f)
+                    )
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    cfg.mirrors.forEach { url ->
+                    cfg.mirrors.forEachIndexed { mirrorIndex, url ->
                         val isPrimary = url == cfg.activeMirrorUrl
                         val health = healthMap[url]
-                        Row(
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onSetPrimaryMirror(source, url) }
-                                .padding(vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .padding(vertical = 4.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Filled.Star,
-                                contentDescription = if (isPrimary) "Primary mirror" else "Set as primary",
-                                tint = if (isPrimary) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            val displayUrl = url.removePrefix("https://").removePrefix("http://")
-                            Text(
-                                text = if (displayUrl.contains("knaben.org", true)) "$displayUrl (1337x Index)" else displayUrl,
-                                style = TelemetryMonoStyle,
-                                color = if (isPrimary) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onSetPrimaryMirror(source, url) }
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Star,
+                                    contentDescription = if (isPrimary) "Primary mirror" else "Set as primary",
+                                    tint = if (isPrimary) MaterialTheme.colorScheme.primary else telemetry.disabledText,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                val displayUrl = url.removePrefix("https://").removePrefix("http://")
+                                Text(
+                                    text = if (displayUrl.contains("knaben.org", true)) "$displayUrl (1337x Index)" else displayUrl,
+                                    style = TelemetryMonoStyle,
+                                    color = if (isPrimary) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
 
-                            // Live Latency / Health Pill
-                            MirrorPingPill(
-                                health = health,
-                                onPing = { onPingSingle(url) }
-                            )
+                                MirrorPingPill(
+                                    health = health,
+                                    onPing = { onPingSingle(source, url) },
+                                    modifier = Modifier.testTag("ping_mirror_${source.name}_$mirrorIndex")
+                                )
 
-                            if (cfg.mirrors.size > 1) {
-                                IconButton(
-                                    onClick = { onRemoveMirror(source, url) },
-                                    modifier = Modifier.size(40.dp)
+                                if (cfg.mirrors.size > 1) {
+                                    IconButton(
+                                        onClick = { onRemoveMirror(source, url) },
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.DeleteOutline,
+                                            contentDescription = "Remove mirror",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Parser verification status + checked timestamp row
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 23.dp, top = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val parserStatus = health?.parserStatus ?: ParserCheckStatus.NEVER_RUN
+                                val parserColor = when (parserStatus) {
+                                    ParserCheckStatus.NEVER_RUN -> MaterialTheme.colorScheme.onSurfaceVariant
+                                    ParserCheckStatus.VERIFIED -> telemetry.seederGreen
+                                    ParserCheckStatus.FAILED -> telemetry.deadRose
+                                }
+                                Text(
+                                    text = buildString {
+                                        append(parserStatus.label)
+                                        health?.parserDetail?.takeIf { it.isNotBlank() }?.let {
+                                            append(" (")
+                                            append(it)
+                                            append(")")
+                                        }
+                                        health?.checkedAtEpochMs?.let { ts ->
+                                            append(" • ")
+                                            append(formatCheckedTime(ts))
+                                        }
+                                    },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = parserColor,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("mirror_parser_status_${source.name}_$mirrorIndex")
+                                )
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .clickable(enabled = health?.isChecking != true) {
+                                            onVerifyParser(source, url)
+                                        }
+                                        .testTag("verify_parser_${source.name}_$mirrorIndex")
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.DeleteOutline,
-                                        contentDescription = "Remove mirror",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.FactCheck,
+                                            contentDescription = "Verify parser on $url",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text(
+                                            text = "Verify Parser",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -229,13 +301,17 @@ fun MirrorManagerSection(
                             onClick = {
                                 newMirrorInput = "https://"
                                 addDialogProvider = source
-                            }
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp)
                         ) {
                             Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Add Mirror")
                         }
-                        TextButton(onClick = { onPromoteFastest(source) }) {
+                        TextButton(
+                            onClick = { onPromoteFastest(source) },
+                            modifier = Modifier.heightIn(min = 48.dp)
+                        ) {
                             Icon(Icons.Filled.Bolt, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Promote Fastest")
@@ -250,6 +326,10 @@ fun MirrorManagerSection(
     if (targetProvider != null) {
         AlertDialog(
             onDismissRequest = { addDialogProvider = null },
+            containerColor = MaterialTheme.colorScheme.surface,
+            titleContentColor = MaterialTheme.colorScheme.onSurface,
+            textContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            shape = RoundedCornerShape(18.dp),
             title = { Text("Add ${targetProvider.displayName} Mirror") },
             text = {
                 Column {
@@ -265,6 +345,13 @@ fun MirrorManagerSection(
                         label = { Text("Mirror URL") },
                         placeholder = { Text("https://x1337x.cc") },
                         singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = telemetry.glassSurfaceElevated,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = telemetry.cardBorder
+                        ),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -274,7 +361,8 @@ fun MirrorManagerSection(
                     onClick = {
                         onAddMirror(targetProvider, newMirrorInput)
                         addDialogProvider = null
-                    }
+                    },
+                    shape = RoundedCornerShape(10.dp)
                 ) {
                     Text("Save & Ping")
                 }
@@ -288,17 +376,22 @@ fun MirrorManagerSection(
     }
 }
 
+private fun formatCheckedTime(epochMs: Long): String =
+    runCatching { DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(epochMs)) }
+        .getOrDefault("Just now")
+
 @Composable
 private fun MirrorPingPill(
     health: MirrorHealthResult?,
-    onPing: () -> Unit
+    onPing: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val telemetry = LocalTelemetryColors.current
     val (bg, fg, label) = when {
         health == null -> Triple(
-            MaterialTheme.colorScheme.surfaceVariant,
+            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
             MaterialTheme.colorScheme.onSurfaceVariant,
-            "Ping"
+            "HTTP Ping"
         )
         health.isChecking -> Triple(
             MaterialTheme.colorScheme.primaryContainer,
@@ -311,7 +404,7 @@ private fun MirrorPingPill(
             Triple(
                 if (isFast) telemetry.seederGreenContainer else telemetry.leecherAmberContainer,
                 if (isFast) telemetry.seederGreen else telemetry.leecherAmber,
-                "${ms}ms"
+                "HTTP ${ms}ms"
             )
         }
         else -> Triple(
@@ -328,7 +421,8 @@ private fun MirrorPingPill(
     Surface(
         color = bg,
         shape = RoundedCornerShape(8.dp),
-        modifier = Modifier
+        border = BorderStroke(0.75.dp, fg.copy(alpha = 0.22f)),
+        modifier = modifier
             .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onPing)
     ) {
@@ -345,7 +439,7 @@ private fun MirrorPingPill(
             } else if (health != null) {
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
+                        .size(5.5.dp)
                         .clip(CircleShape)
                         .background(fg)
                 )
@@ -355,7 +449,7 @@ private fun MirrorPingPill(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = fg,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.SemiBold
             )
         }
     }

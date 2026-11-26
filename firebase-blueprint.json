@@ -2,7 +2,7 @@
   "entities": {
     "BookmarkRecord": {
       "title": "BookmarkRecord",
-      "description": "A user-saved torrent result with magnet link and metadata synced across devices.",
+      "description": "A user-saved torrent result with magnet link, optional v2 CAS revision/tombstone sync metadata, and canonical identity.",
       "type": "object",
       "properties": {
         "userId": {
@@ -59,6 +59,31 @@
           "type": "array",
           "description": "Parsed video/release quality tags"
         },
+        "revision": {
+          "type": "integer",
+          "description": "Optional v2 monotonic CAS sync revision (>= 1)"
+        },
+        "deleted": {
+          "type": "boolean",
+          "description": "Optional v2 tombstone soft-delete marker"
+        },
+        "deletedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional v2 tombstone timestamp when deleted=true"
+        },
+        "lastOpId": {
+          "type": "string",
+          "description": "Optional v2 idempotent outbox operation ID"
+        },
+        "canonicalIdentity": {
+          "type": "string",
+          "description": "Optional v2 canonical release identity key"
+        },
+        "legacyDocId": {
+          "type": "string",
+          "description": "Optional v2 legacy bookmark document ID"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time",
@@ -90,7 +115,7 @@
     },
     "SearchHistoryRecord": {
       "title": "SearchHistoryRecord",
-      "description": "A user search query stored for quick re-search across devices.",
+      "description": "A user search query stored for quick re-search across devices (opt-in sync).",
       "type": "object",
       "properties": {
         "userId": {
@@ -105,6 +130,23 @@
           "type": "string",
           "enum": ["ALL", "MOVIES", "TV", "ANIME", "GAMES", "APPS", "MUSIC", "OTHER"],
           "description": "Selected category when searched"
+        },
+        "revision": {
+          "type": "integer",
+          "description": "Optional v2 monotonic CAS sync revision (>= 1)"
+        },
+        "deleted": {
+          "type": "boolean",
+          "description": "Optional v2 tombstone soft-delete marker"
+        },
+        "deletedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Optional v2 tombstone timestamp when deleted=true"
+        },
+        "lastOpId": {
+          "type": "string",
+          "description": "Optional v2 idempotent outbox operation ID"
         },
         "createdAt": {
           "type": "string",
@@ -121,7 +163,7 @@
     },
     "MirrorConfigRecord": {
       "title": "MirrorConfigRecord",
-      "description": "User-customized mirror URLs and enabled state per torrent indexer.",
+      "description": "User-customized mirror URLs and enabled state per torrent indexer (opt-in sync).",
       "type": "object",
       "properties": {
         "userId": {
@@ -144,6 +186,14 @@
         "activeMirrorUrl": {
           "type": "string",
           "description": "Preferred primary mirror URL"
+        },
+        "revision": {
+          "type": "integer",
+          "description": "Optional v2 monotonic CAS sync revision (>= 1)"
+        },
+        "lastOpId": {
+          "type": "string",
+          "description": "Optional v2 idempotent outbox operation ID"
         },
         "createdAt": {
           "type": "string",

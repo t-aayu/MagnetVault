@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag (e.g. v1.0.0)'
+        description: 'Release tag (e.g. v2.0.0)'
         required: true
-        default: 'v1.0.0'
+        default: 'v2.0.0'
       draft:
         description: 'Create as draft release'
         type: boolean
@@ -48,7 +48,7 @@ jobs:
             yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null 2>&1 || true
           fi
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
@@ -90,8 +90,11 @@ jobs:
               -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Run JVM unit tests
-        run: gradle :app:testDebugUnitTest --tests com.example.ExampleUnitTest
+      - name: Run Android Lint and full JVM/Robolectric suite
+        shell: bash
+        run: |
+          GRADLE_BIN=$([[ -x ./gradlew ]] && echo "./gradlew" || echo "gradle")
+          $GRADLE_BIN :app:lintDebug :app:testDebugUnitTest
 
       - name: Check release signing secrets
         id: signing
@@ -117,15 +120,21 @@ jobs:
 
       - name: Build signed Release APK & AAB
         if: steps.signing.outputs.signed == 'true'
+        shell: bash
         env:
           KEYSTORE_PATH: ${{ runner.temp }}/my-upload-key.jks
           STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: gradle :app:assembleRelease :app:bundleRelease
+        run: |
+          GRADLE_BIN=$([[ -x ./gradlew ]] && echo "./gradlew" || echo "gradle")
+          $GRADLE_BIN :app:assembleRelease :app:bundleRelease
 
       - name: Build Debug APK fallback (unsigned release secrets not configured)
         if: steps.signing.outputs.signed != 'true'
-        run: gradle :app:assembleDebug
+        shell: bash
+        run: |
+          GRADLE_BIN=$([[ -x ./gradlew ]] && echo "./gradlew" || echo "gradle")
+          $GRADLE_BIN :app:assembleDebug
 
       - name: Stage release artifacts and SHA-256 checksums
         shell: bash

@@ -24,8 +24,18 @@ data class BookmarkRecord(
     val detailPageUrl: String = "",
     val qualityTags: List<String> = emptyList(),
     val createdAt: Timestamp? = null,
-    val updatedAt: Timestamp? = null
+    val updatedAt: Timestamp? = null,
+    // Phase 2 v2 sync metadata (nullable for seamless v1 backwards compatibility)
+    val revision: Long? = null,
+    val deleted: Boolean? = null,
+    val deletedAt: Timestamp? = null,
+    val lastOpId: String? = null,
+    val canonicalIdentity: String? = null,
+    val legacyDocId: String? = null
 ) {
+    val effectiveRevision: Long get() = (revision ?: 0L).coerceAtLeast(0L)
+    val isTombstone: Boolean get() = deleted == true
+
     fun toTorrentResult(): TorrentResult {
         val parsedTags = qualityTags.mapNotNull { QualityTag.fromLabelOrName(it) }
         return TorrentResult(
@@ -75,8 +85,16 @@ data class SearchHistoryRecord(
     val query: String = "",
     val category: String = TorrentCategory.ALL.name,
     val createdAt: Timestamp? = null,
-    val updatedAt: Timestamp? = null
+    val updatedAt: Timestamp? = null,
+    // Phase 2 v2 sync metadata
+    val revision: Long? = null,
+    val deleted: Boolean? = null,
+    val deletedAt: Timestamp? = null,
+    val lastOpId: String? = null
 ) {
+    val effectiveRevision: Long get() = (revision ?: 0L).coerceAtLeast(0L)
+    val isTombstone: Boolean get() = deleted == true
+
     companion object {
         fun toCreateMap(userId: String, query: String, category: TorrentCategory): Map<String, Any> = mapOf(
             "userId" to userId.take(128),
@@ -98,8 +116,13 @@ data class MirrorConfigRecord(
     val mirrors: List<String> = emptyList(),
     val activeMirrorUrl: String = "",
     val createdAt: Timestamp? = null,
-    val updatedAt: Timestamp? = null
+    val updatedAt: Timestamp? = null,
+    // Phase 2 v2 sync metadata
+    val revision: Long? = null,
+    val lastOpId: String? = null
 ) {
+    val effectiveRevision: Long get() = (revision ?: 0L).coerceAtLeast(0L)
+
     fun toMirrorConfig(): MirrorConfig {
         val src = IndexerSource.fromNameSafe(provider)
         val sanitizedMirrors = mirrors.filter { it.startsWith("http") }.ifEmpty { src.defaultMirrors }

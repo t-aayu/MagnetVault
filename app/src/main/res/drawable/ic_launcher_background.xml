@@ -1,5 +1,84 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android"
-    android:shape="rectangle">
-    <solid android:color="#0E1118" />
-</shape>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Deep navy-charcoal full-bleed base (zero rounded corners for adaptive masking) -->
+    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="10"
+                android:startY="6"
+                android:endX="98"
+                android:endY="102"
+                android:type="linear">
+                <item android:color="#FF151A2C" android:offset="0.0" />
+                <item android:color="#FF0E1220" android:offset="0.52" />
+                <item android:color="#FF0B0D17" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Top-left subtle icy steel-blue frosted highlight -->
+    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="12"
+                android:centerY="12"
+                android:gradientRadius="78"
+                android:type="radial">
+                <item android:color="#664C629C" android:offset="0.0" />
+                <item android:color="#2E364A7A" android:offset="0.48" />
+                <item android:color="#00111526" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Top-right subtle muted violet frosted highlight -->
+    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="98"
+                android:centerY="18"
+                android:gradientRadius="72"
+                android:type="radial">
+                <item android:color="#66523B8A" android:offset="0.0" />
+                <item android:color="#2B3A2A66" android:offset="0.5" />
+                <item android:color="#000E1220" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Bottom-left subtle muted violet ambient glow -->
+    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="12"
+                android:centerY="96"
+                android:gradientRadius="70"
+                android:type="radial">
+                <item android:color="#614E378C" android:offset="0.0" />
+                <item android:color="#26362666" android:offset="0.5" />
+                <item android:color="#000B0D17" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+
+    <!-- Bottom-right subtle icy cyan-blue ambient glow -->
+    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:centerX="98"
+                android:centerY="96"
+                android:gradientRadius="68"
+                android:type="radial">
+                <item android:color="#592F627D" android:offset="0.0" />
+                <item android:color="#241F455C" android:offset="0.5" />
+                <item android:color="#000B0D17" android:offset="1.0" />
+            </gradient>
+        </aapt:attr>
+    </path>
+</vector>

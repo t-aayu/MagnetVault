@@ -2,6 +2,9 @@ package com.example.data.indexers
 
 import android.util.Xml
 import androidx.core.text.HtmlCompat
+import com.example.data.network.MirrorBlockedException
+import com.example.domain.magnet.MagnetParser
+import com.example.domain.magnet.TorrentHashFamily
 import com.example.model.IndexerSource
 import com.example.model.QualityAndHealthParser
 import com.example.model.TorrentCategory
@@ -15,13 +18,15 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
+class ParserException(message: String, cause: Throwable? = null) : IllegalStateException(message, cause)
+
 object IndexerParsers {
 
     private fun decodeHtml(input: String): String =
         HtmlCompat.fromHtml(input, HtmlCompat.FROM_HTML_MODE_LEGACY).toString().trim()
 
-    private fun formatEpoch(epochSeconds: Long): String {
-        if (epochSeconds <= 0L) return "Recent"
+    private fun formatEpoch(epochSeconds: Long?): String {
+        if (epochSeconds == null || epochSeconds <= 0L) return "Unknown"
         val fmt = SimpleDateFormat("MMM dd, yyyy", Locale.US)
         return fmt.format(Date(epochSeconds * 1000L))
     }
@@ -42,39 +47,80 @@ object IndexerParsers {
             sample.contains("ddos-guard")
     }
 
+    private fun parseOptionalInt(obj: JSONObject, vararg keys: String): Int? {
+        for (key in keys) {
+            if (!obj.has(key) || obj.isNull(key)) continue
+            val raw = obj.opt(key) ?: continue
+            when (raw) {
+                is Number -> return raw.toInt().coerceAtLeast(0)
+                is String -> raw.trim().replace(",", "").toIntOrNull()?.let { return it.coerceAtLeast(0) }
+            }
+        }
+        return null
+    }
+
+    private fun parseOptionalLong(obj: JSONObject, vararg keys: String): Long? {
+        for (key in keys) {
+            if (!obj.has(key) || obj.isNull(key)) continue
+            val raw = obj.opt(key) ?: continue
+            when (raw) {
+                is Number -> return raw.toLong().coerceAtLeast(0L)
+                is String -> raw.trim().replace(",", "").toLongOrNull()?.let { return it.coerceAtLeast(0L) }
+            }
+        }
+        return null
+    }
+
     // --- 1. THE PIRATE BAY (ApiBay JSON API) ---
     fun parseApiBayJson(jsonBody: String, baseUrl: String): List<TorrentResult> {
         val trimmed = jsonBody.trim()
-        if (!trimmed.startsWith("[")) return emptyList()
-        val arr = JSONArray(trimmed)
+        if (!trimmed.startsWith("[")) {
+            throw ParserException("Expected JSON array from ApiBay")
+        }
+        val arr = runCatching { JSONArray(trimmed) }.getOrElse {
+            throw ParserException("Malformed ApiBay JSON array", it)
+        }
         val results = mutableListOf<TorrentResult>()
         for (i in 0 until arr.length()) {
             val obj = arr.optJSONObject(i) ?: continue
-            val id = obj.optString("id", "")
+            val id = obj.optString("id", "").trim()
             val name = obj.optString("name", "").trim()
-            val infoHash = obj.optString("info_hash", "").trim()
-            if (id == "0" || name.isBlank() || infoHash.isBlank() || infoHash.all { it == '0' }) continue
-            val seeders = obj.optString("seeders", "0").toIntOrNull() ?: obj.optInt("seeders", 0)
-            val leechers = obj.optString("leechers", "0").toIntOrNull() ?: obj.optInt("leechers", 0)
-            val sizeBytes = obj.optString("size", "0").toLongOrNull() ?: obj.optLong("size", 0L)
-            val addedEpoch = obj.optString("added", "0").toLongOrNull() ?: obj.optLong("added", 0L)
+            val rawHash = obj.optString("info_hash", "").trim()
+            if (id == "0" || name.equals("No results returned", ignoreCase = true)) continue
+            val verifiedHash = MagnetParser.normalizeHash(rawHash) ?: continue
+            if (name.isBlank() || verifiedHash.canonicalHex.all { it == '0' }) continue
+
+            val knownSeeders = parseOptionalInt(obj, "seeders")
+            val knownLeechers = parseOptionalInt(obj, "leechers")
+            val knownSizeBytes = parseOptionalLong(obj, "size")
+            val knownAddedEpoch = parseOptionalLong(obj, "added")?.takeIf { it > 0L }
             val catCode = obj.optString("category", "0").toIntOrNull() ?: 0
             val category = mapTpbCategory(catCode)
-            val magnet = QualityAndHealthParser.buildMagnetFromHash(infoHash, name)
+            val magnet = MagnetParser.buildMagnetFromHash(verifiedHash.canonicalHex, name, verifiedHash.family)
+            val listingId = id.ifBlank { verifiedHash.canonicalHex.take(16) }
+
             results += TorrentResult(
-                id = "tpb_$id",
+                id = "tpb_$listingId",
                 title = name,
                 source = IndexerSource.TPB,
                 category = category,
-                sizeLabel = QualityAndHealthParser.formatBytes(sizeBytes),
-                sizeBytes = sizeBytes,
-                seeders = seeders,
-                leechers = leechers,
-                uploadDateLabel = formatEpoch(addedEpoch),
-                uploadEpochSeconds = addedEpoch,
+                sizeLabel = QualityAndHealthParser.formatKnownBytes(knownSizeBytes),
+                sizeBytes = knownSizeBytes ?: 0L,
+                seeders = knownSeeders ?: 0,
+                leechers = knownLeechers ?: 0,
+                uploadDateLabel = formatEpoch(knownAddedEpoch),
+                uploadEpochSeconds = knownAddedEpoch ?: 0L,
                 magnetUri = magnet,
-                infoHash = infoHash.lowercase(Locale.US),
-                detailPageUrl = "${baseUrl.trimEnd('/')}/t.php?id=$id"
+                infoHash = verifiedHash.canonicalHex,
+                detailPageUrl = "${baseUrl.trimEnd('/')}/t.php?id=$listingId",
+                swarmHealth = QualityAndHealthParser.computeSwarmHealth(knownSeeders, knownLeechers),
+                listingId = listingId,
+                knownSizeBytes = knownSizeBytes,
+                knownSeeders = knownSeeders,
+                knownLeechers = knownLeechers,
+                knownUploadEpochSeconds = knownAddedEpoch,
+                canonicalHashHex = verifiedHash.canonicalHex,
+                canonicalHashFamily = verifiedHash.family
             )
         }
         return results
@@ -92,19 +138,30 @@ object IndexerParsers {
 
     // --- 2. YTS (JSON API v2) ---
     fun parseYtsJson(jsonBody: String): List<TorrentResult> {
-        val root = JSONObject(jsonBody)
-        val data = root.optJSONObject("data") ?: return emptyList()
+        val trimmed = jsonBody.trim()
+        if (!trimmed.startsWith("{")) {
+            throw ParserException("Expected JSON object from YTS")
+        }
+        val root = runCatching { JSONObject(trimmed) }.getOrElse {
+            throw ParserException("Malformed YTS JSON response", it)
+        }
+        if (root.optString("status", "").equals("error", ignoreCase = true)) {
+            throw ParserException(root.optString("status_message", "YTS API error"))
+        }
+        val data = root.optJSONObject("data")
+            ?: throw ParserException("YTS JSON missing data payload")
         val movies = data.optJSONArray("movies") ?: return emptyList()
         val results = mutableListOf<TorrentResult>()
+
         for (i in 0 until movies.length()) {
             val movie = movies.optJSONObject(i) ?: continue
             val titleLong = movie.optString("title_long", movie.optString("title", "")).trim()
+            if (titleLong.isBlank()) continue
             val movieUrl = movie.optString("url", "")
             val torrents = movie.optJSONArray("torrents") ?: continue
             for (j in 0 until torrents.length()) {
                 val t = torrents.optJSONObject(j) ?: continue
-                val hash = t.optString("hash", "").trim()
-                if (hash.isBlank()) continue
+                val verifiedHash = MagnetParser.normalizeHash(t.optString("hash", "")) ?: continue
                 val quality = t.optString("quality", "")
                 val type = t.optString("type", "").uppercase(Locale.US)
                 val codec = t.optString("video_codec", "")
@@ -114,29 +171,40 @@ object IndexerParsers {
                     if (type.isNotBlank()) append(" [$type]")
                     if (codec.isNotBlank() && !codec.equals("x264", true)) append(" [$codec]")
                 }
-                val sizeBytes = t.optLong("size_bytes", 0L)
-                val sizeLabel = t.optString("size", "").ifBlank {
-                    QualityAndHealthParser.formatBytes(sizeBytes)
-                }
-                val seeds = t.optInt("seeds", 0)
-                val peers = t.optInt("peers", 0)
-                val epoch = t.optLong("date_uploaded_unix", 0L)
+                val rawSizeStr = t.optString("size", "").trim()
+                val knownSizeBytes = parseOptionalLong(t, "size_bytes")?.takeIf { it > 0L }
+                    ?: QualityAndHealthParser.parseSizeToKnownBytes(rawSizeStr)
+                val sizeLabel = rawSizeStr.ifBlank { QualityAndHealthParser.formatKnownBytes(knownSizeBytes) }
+                val knownSeeds = parseOptionalInt(t, "seeds")
+                val knownPeers = parseOptionalInt(t, "peers")
+                val knownEpoch = parseOptionalLong(t, "date_uploaded_unix")?.takeIf { it > 0L }
                 val dateLabel = t.optString("date_uploaded", "").substringBefore(" ")
-                    .ifBlank { formatEpoch(epoch) }
+                    .trim()
+                    .ifBlank { formatEpoch(knownEpoch) }
+                val listingId = verifiedHash.canonicalHex.take(16)
+
                 results += TorrentResult(
-                    id = "yts_${hash.take(16)}",
+                    id = "yts_$listingId",
                     title = fullTitle,
                     source = IndexerSource.YTS,
                     category = TorrentCategory.MOVIES,
                     sizeLabel = sizeLabel,
-                    sizeBytes = sizeBytes,
-                    seeders = seeds,
-                    leechers = peers,
+                    sizeBytes = knownSizeBytes ?: 0L,
+                    seeders = knownSeeds ?: 0,
+                    leechers = knownPeers ?: 0,
                     uploadDateLabel = dateLabel,
-                    uploadEpochSeconds = epoch,
-                    magnetUri = QualityAndHealthParser.buildMagnetFromHash(hash, fullTitle),
-                    infoHash = hash.lowercase(Locale.US),
-                    detailPageUrl = movieUrl
+                    uploadEpochSeconds = knownEpoch ?: 0L,
+                    magnetUri = MagnetParser.buildMagnetFromHash(verifiedHash.canonicalHex, fullTitle, verifiedHash.family),
+                    infoHash = verifiedHash.canonicalHex,
+                    detailPageUrl = movieUrl,
+                    swarmHealth = QualityAndHealthParser.computeSwarmHealth(knownSeeds, knownPeers),
+                    listingId = listingId,
+                    knownSizeBytes = knownSizeBytes,
+                    knownSeeders = knownSeeds,
+                    knownLeechers = knownPeers,
+                    knownUploadEpochSeconds = knownEpoch,
+                    canonicalHashHex = verifiedHash.canonicalHex,
+                    canonicalHashFamily = verifiedHash.family
                 )
             }
         }
@@ -144,14 +212,10 @@ object IndexerParsers {
     }
 
     // --- 3. EZTV (IMDb Suggestion ID Resolution + JSON API + HTML Search) ---
-    /**
-     * Parses IMDb public suggestion JSON (`v3.sg.media-imdb.com/suggestion/...`) to extract
-     * numeric IMDb IDs (without leading "tt") for EZTV's `/api/get-torrents?imdb_id=...` API.
-     */
     fun parseImdbSuggestionIds(jsonBody: String): List<String> {
         val trimmed = jsonBody.trim()
         if (!trimmed.startsWith("{")) return emptyList()
-        val root = JSONObject(trimmed)
+        val root = runCatching { JSONObject(trimmed) }.getOrNull() ?: return emptyList()
         val arr = root.optJSONArray("d") ?: return emptyList()
         val tvIds = mutableListOf<String>()
         val fallbackIds = mutableListOf<String>()
@@ -176,9 +240,16 @@ object IndexerParsers {
         filterTokens: List<String> = emptyList()
     ): List<TorrentResult> {
         val trimmed = jsonBody.trim()
-        if (!trimmed.startsWith("{")) return emptyList()
-        val root = JSONObject(trimmed)
-        val arr = root.optJSONArray("torrents") ?: return emptyList()
+        if (!trimmed.startsWith("{")) {
+            throw ParserException("Expected JSON object from EZTV API")
+        }
+        val root = runCatching { JSONObject(trimmed) }.getOrElse {
+            throw ParserException("Malformed EZTV JSON response", it)
+        }
+        val arr = root.optJSONArray("torrents") ?: run {
+            if (root.has("torrents_count")) return emptyList()
+            throw ParserException("EZTV JSON missing torrents array")
+        }
         val normalizedTokens = filterTokens.map { it.lowercase(Locale.US) }.filter { it.isNotBlank() }
         val results = mutableListOf<TorrentResult>()
         for (i in 0 until arr.length()) {
@@ -196,40 +267,53 @@ object IndexerParsers {
                 }
             }
             val magnet = obj.optString("magnet_url", "").trim()
-            val hash = obj.optString("hash", "").trim().ifBlank {
-                QualityAndHealthParser.extractHashFromMagnet(magnet)
-            }
+            val verifiedFromMagnet = MagnetParser.extractVerifiedIdentities(magnet).firstOrNull()
+            val verifiedFromField = MagnetParser.normalizeHash(obj.optString("hash", ""))
+            val verified = verifiedFromField ?: verifiedFromMagnet
             val finalMagnet = magnet.ifBlank {
-                QualityAndHealthParser.buildMagnetFromHash(hash, title)
+                verified?.let { MagnetParser.buildMagnetFromHash(it.canonicalHex, title, it.family) }.orEmpty()
             }
-            val sizeBytes = obj.optString("size_bytes", "0").toLongOrNull()
-                ?: obj.optLong("size_bytes", 0L)
-            val seeds = obj.optString("seeds", "").toIntOrNull() ?: obj.optInt("seeds", 0)
-            val peers = obj.optString("peers", "").toIntOrNull() ?: obj.optInt("peers", 0)
-            val epoch = obj.optString("date_released_unix", "").toLongOrNull()
-                ?: obj.optLong("date_released_unix", 0L)
-            val stableId = hash.ifBlank { obj.optString("id", title.hashCode().toUInt().toString()) }
+            val knownSizeBytes = parseOptionalLong(obj, "size_bytes")
+            val knownSeeds = parseOptionalInt(obj, "seeds")
+            val knownPeers = parseOptionalInt(obj, "peers")
+            val knownEpoch = parseOptionalLong(obj, "date_released_unix")?.takeIf { it > 0L }
+            val stableId = verified?.canonicalHex ?: obj.optString("id", title.hashCode().toUInt().toString())
+
             results += TorrentResult(
                 id = "eztv_$stableId",
                 title = title,
                 source = IndexerSource.EZTV,
                 category = TorrentCategory.TV,
-                sizeLabel = QualityAndHealthParser.formatBytes(sizeBytes),
-                sizeBytes = sizeBytes,
-                seeders = seeds,
-                leechers = peers,
-                uploadDateLabel = formatEpoch(epoch),
-                uploadEpochSeconds = epoch,
+                sizeLabel = QualityAndHealthParser.formatKnownBytes(knownSizeBytes),
+                sizeBytes = knownSizeBytes ?: 0L,
+                seeders = knownSeeds ?: 0,
+                leechers = knownPeers ?: 0,
+                uploadDateLabel = formatEpoch(knownEpoch),
+                uploadEpochSeconds = knownEpoch ?: 0L,
                 magnetUri = finalMagnet.ifBlank { null },
-                infoHash = hash.lowercase(Locale.US),
-                detailPageUrl = obj.optString("episode_url", "")
+                infoHash = verified?.canonicalHex.orEmpty(),
+                detailPageUrl = obj.optString("episode_url", ""),
+                swarmHealth = QualityAndHealthParser.computeSwarmHealth(knownSeeds, knownPeers),
+                listingId = stableId,
+                knownSizeBytes = knownSizeBytes,
+                knownSeeders = knownSeeds,
+                knownLeechers = knownPeers,
+                knownUploadEpochSeconds = knownEpoch,
+                canonicalHashHex = verified?.canonicalHex.orEmpty(),
+                canonicalHashFamily = verified?.family
             )
         }
         return results
     }
 
     fun parseEztvSearchHtml(html: String, baseUrl: String): List<TorrentResult> {
-        if (isCloudflareOrBlockedHtml(html)) return emptyList()
+        if (isCloudflareOrBlockedHtml(html)) {
+            throw MirrorBlockedException("Blocked or challenge page on $baseUrl")
+        }
+        val lowerHtml = html.lowercase(Locale.US)
+        if (!lowerHtml.contains("<table") && !lowerHtml.contains("<tr") && !lowerHtml.contains("<html")) {
+            throw ParserException("Unrecognized EZTV HTML response")
+        }
         val results = mutableListOf<TorrentResult>()
         val rowRegex = Regex("<tr[^>]*>(.*?)</tr>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
         val epLinkRegex = Regex(
@@ -255,41 +339,54 @@ object IndexerParsers {
             val magnet = magnetRegex.find(row)?.groupValues?.getOrNull(1)?.let { decodeHtml(it) }
             val tds = tdRegex.findAll(row).map { decodeHtml(it.groupValues[1]).trim() }.toList()
 
-            val sizeLabel = tds.firstOrNull { sizePattern.matches(it) }
-                ?: tds.getOrNull(3)?.takeIf { it.isNotBlank() }
-                ?: "—"
-            val dateLabel = tds.firstOrNull { datePattern.matches(it) }
-                ?: tds.getOrNull(4)?.takeIf { it.isNotBlank() }
-                ?: "Recent"
-            val seeds = tds.lastOrNull { it.replace(",", "").toIntOrNull() != null }
+            val rawSizeText = tds.firstOrNull { sizePattern.matches(it) }
+                ?: tds.getOrNull(3)?.takeIf { it.isNotBlank() && it != "-" && it != "—" }
+            val knownSizeBytes = rawSizeText?.let { QualityAndHealthParser.parseSizeToKnownBytes(it) }
+            val sizeLabel = rawSizeText ?: "Unknown"
+
+            val rawDateText = tds.firstOrNull { datePattern.matches(it) }
+                ?: tds.getOrNull(4)?.takeIf { it.isNotBlank() && it != "-" && it != "—" }
+            val dateLabel = rawDateText ?: "Unknown"
+            val knownEpoch = rawDateText?.let { estimateRelativeEpochOrNull(it) }
+
+            val knownSeeds = tds.lastOrNull { it.replace(",", "").toIntOrNull() != null }
                 ?.replace(",", "")
                 ?.toIntOrNull()
-                ?: 0
+                ?.coerceAtLeast(0)
 
-            val hash = QualityAndHealthParser.extractHashFromMagnet(magnet)
+            val verified = MagnetParser.extractVerifiedIdentities(magnet).firstOrNull()
             val fullDetailUrl = if (rawHref.startsWith("http", ignoreCase = true)) {
                 rawHref
             } else {
                 "${baseUrl.trimEnd('/')}/${rawHref.trimStart('/')}"
             }
-            val finalMagnet = magnet?.ifBlank { null } ?: if (hash.isNotBlank()) {
-                QualityAndHealthParser.buildMagnetFromHash(hash, title)
-            } else null
+            val finalMagnet = magnet?.ifBlank { null } ?: verified?.let {
+                MagnetParser.buildMagnetFromHash(it.canonicalHex, title, it.family)
+            }
+            val listingId = verified?.canonicalHex ?: rawHref.hashCode().toUInt().toString()
 
             results += TorrentResult(
-                id = "eztv_${hash.ifBlank { rawHref.hashCode().toUInt().toString() }}",
+                id = "eztv_$listingId",
                 title = title,
                 source = IndexerSource.EZTV,
                 category = TorrentCategory.TV,
                 sizeLabel = sizeLabel,
-                sizeBytes = QualityAndHealthParser.parseSizeToBytes(sizeLabel),
-                seeders = seeds,
+                sizeBytes = knownSizeBytes ?: 0L,
+                seeders = knownSeeds ?: 0,
                 leechers = 0,
                 uploadDateLabel = dateLabel,
-                uploadEpochSeconds = estimateRelativeEpoch(dateLabel),
+                uploadEpochSeconds = knownEpoch ?: 0L,
                 magnetUri = finalMagnet,
-                infoHash = hash,
-                detailPageUrl = fullDetailUrl
+                infoHash = verified?.canonicalHex.orEmpty(),
+                detailPageUrl = fullDetailUrl,
+                swarmHealth = QualityAndHealthParser.computeSwarmHealth(knownSeeds, null),
+                listingId = listingId,
+                knownSizeBytes = knownSizeBytes,
+                knownSeeders = knownSeeds,
+                knownLeechers = null, // EZTV HTML table does not report leecher count
+                knownUploadEpochSeconds = knownEpoch,
+                canonicalHashHex = verified?.canonicalHex.orEmpty(),
+                canonicalHashFamily = verified?.family
             )
             if (results.size >= 50) break
         }
@@ -298,75 +395,104 @@ object IndexerParsers {
 
     // --- 4. NYAA (RSS XML) ---
     fun parseNyaaRss(xmlBody: String): List<TorrentResult> {
+        val trimmed = xmlBody.trim()
+        if (!trimmed.startsWith("<")) {
+            throw ParserException("Expected XML feed from Nyaa")
+        }
         val results = mutableListOf<TorrentResult>()
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-        parser.setInput(StringReader(xmlBody))
+        parser.setInput(StringReader(trimmed))
 
+        var sawRssOrFeedRoot = false
         var inItem = false
         var title = ""
         var link = ""
         var pubDate = ""
-        var seeders = 0
-        var leechers = 0
+        var seeders: Int? = null
+        var leechers: Int? = null
         var sizeLabel = ""
-        var infoHash = ""
+        var infoHashRaw = ""
         var categoryText = ""
 
-        var eventType = parser.eventType
-        while (eventType != XmlPullParser.END_DOCUMENT) {
-            when (eventType) {
-                XmlPullParser.START_TAG -> {
-                    val tag = parser.name.lowercase(Locale.US)
-                    if (tag == "item") {
-                        inItem = true
-                        title = ""
-                        link = ""
-                        pubDate = ""
-                        seeders = 0
-                        leechers = 0
-                        sizeLabel = ""
-                        infoHash = ""
-                        categoryText = ""
-                    } else if (inItem) {
-                        val text = runCatching { parser.nextText().trim() }.getOrDefault("")
-                        when (tag) {
-                            "title" -> title = text
-                            "guid", "link" -> if (link.isBlank() || tag == "guid") link = text
-                            "pubdate" -> pubDate = text
-                            "nyaa:seeders" -> seeders = text.toIntOrNull() ?: 0
-                            "nyaa:leechers" -> leechers = text.toIntOrNull() ?: 0
-                            "nyaa:size" -> sizeLabel = text
-                            "nyaa:infohash" -> infoHash = text.lowercase(Locale.US)
-                            "nyaa:category" -> categoryText = text
+        try {
+            var eventType = parser.eventType
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                when (eventType) {
+                    XmlPullParser.START_TAG -> {
+                        val tag = parser.name.lowercase(Locale.US)
+                        if (tag == "rss" || tag == "channel" || tag == "feed") {
+                            sawRssOrFeedRoot = true
+                        }
+                        if (tag == "item") {
+                            inItem = true
+                            title = ""
+                            link = ""
+                            pubDate = ""
+                            seeders = null
+                            leechers = null
+                            sizeLabel = ""
+                            infoHashRaw = ""
+                            categoryText = ""
+                        } else if (inItem) {
+                            when (tag) {
+                                "title" -> title = parser.nextText().trim()
+                                "guid", "link" -> {
+                                    val text = parser.nextText().trim()
+                                    if (link.isBlank() || tag == "guid") link = text
+                                }
+                                "pubdate" -> pubDate = parser.nextText().trim()
+                                "nyaa:seeders" -> seeders = parser.nextText().trim().toIntOrNull()?.coerceAtLeast(0)
+                                "nyaa:leechers" -> leechers = parser.nextText().trim().toIntOrNull()?.coerceAtLeast(0)
+                                "nyaa:size" -> sizeLabel = parser.nextText().trim()
+                                "nyaa:infohash" -> infoHashRaw = parser.nextText().trim()
+                                "nyaa:category" -> categoryText = parser.nextText().trim()
+                            }
+                        }
+                    }
+                    XmlPullParser.END_TAG -> {
+                        if (parser.name.equals("item", ignoreCase = true) && inItem) {
+                            inItem = false
+                            val verified = MagnetParser.normalizeHash(infoHashRaw)
+                            if (title.isNotBlank() && verified != null) {
+                                val knownEpoch = parseRssDateEpochOrNull(pubDate)
+                                val knownSize = QualityAndHealthParser.parseSizeToKnownBytes(sizeLabel)
+                                val displayTitle = decodeHtml(title)
+                                val listingId = verified.canonicalHex.take(16)
+                                results += TorrentResult(
+                                    id = "nyaa_$listingId",
+                                    title = displayTitle,
+                                    source = IndexerSource.NYAA,
+                                    category = mapNyaaCategory(categoryText),
+                                    sizeLabel = sizeLabel.ifBlank { QualityAndHealthParser.formatKnownBytes(knownSize) },
+                                    sizeBytes = knownSize ?: 0L,
+                                    seeders = seeders ?: 0,
+                                    leechers = leechers ?: 0,
+                                    uploadDateLabel = formatEpoch(knownEpoch),
+                                    uploadEpochSeconds = knownEpoch ?: 0L,
+                                    magnetUri = MagnetParser.buildMagnetFromHash(verified.canonicalHex, displayTitle, verified.family),
+                                    infoHash = verified.canonicalHex,
+                                    detailPageUrl = link,
+                                    swarmHealth = QualityAndHealthParser.computeSwarmHealth(seeders, leechers),
+                                    listingId = listingId,
+                                    knownSizeBytes = knownSize,
+                                    knownSeeders = seeders,
+                                    knownLeechers = leechers,
+                                    knownUploadEpochSeconds = knownEpoch,
+                                    canonicalHashHex = verified.canonicalHex,
+                                    canonicalHashFamily = verified.family
+                                )
+                            }
                         }
                     }
                 }
-                XmlPullParser.END_TAG -> {
-                    if (parser.name.equals("item", ignoreCase = true) && inItem) {
-                        inItem = false
-                        if (title.isNotBlank() && infoHash.isNotBlank()) {
-                            val epoch = parseRssDateEpoch(pubDate)
-                            results += TorrentResult(
-                                id = "nyaa_${infoHash.take(16)}",
-                                title = decodeHtml(title),
-                                source = IndexerSource.NYAA,
-                                category = mapNyaaCategory(categoryText),
-                                sizeLabel = sizeLabel.ifBlank { "—" },
-                                sizeBytes = QualityAndHealthParser.parseSizeToBytes(sizeLabel),
-                                seeders = seeders,
-                                leechers = leechers,
-                                uploadDateLabel = formatEpoch(epoch),
-                                uploadEpochSeconds = epoch,
-                                magnetUri = QualityAndHealthParser.buildMagnetFromHash(infoHash, title),
-                                infoHash = infoHash,
-                                detailPageUrl = link
-                            )
-                        }
-                    }
-                }
+                eventType = parser.next()
             }
-            eventType = parser.next()
+        } catch (e: Exception) {
+            throw ParserException("Malformed Nyaa RSS XML", e)
+        }
+        if (!sawRssOrFeedRoot || inItem) {
+            throw ParserException("Unexpected or truncated RSS XML response from Nyaa")
         }
         return results
     }
@@ -388,7 +514,19 @@ object IndexerParsers {
         baseUrl: String,
         fallbackCategory: TorrentCategory
     ): List<TorrentResult> {
-        if (isCloudflareOrBlockedHtml(html)) return emptyList()
+        if (isCloudflareOrBlockedHtml(html)) {
+            throw MirrorBlockedException("Cloudflare or challenge page on $baseUrl")
+        }
+        val lowerSample = html.lowercase(Locale.US)
+        val looksLike1337xShell = lowerSample.contains("table-list") ||
+            lowerSample.contains("/torrent/") ||
+            lowerSample.contains("no results were returned") ||
+            lowerSample.contains("search-page") ||
+            lowerSample.contains("box-info")
+        if (!looksLike1337xShell) {
+            throw ParserException("Unrecognized 1337x HTML payload")
+        }
+
         val results = mutableListOf<TorrentResult>()
         val rowRegex = Regex("<tr[^>]*>(.*?)</tr>", setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
         val linkRegex = Regex(
@@ -412,28 +550,30 @@ object IndexerParsers {
 
             val rawTds = tdRegex.findAll(row).map { it.groupValues[1] }.toList()
 
-            val seeds = seedsRegex.find(row)?.groupValues?.getOrNull(1)
+            val knownSeeds = seedsRegex.find(row)?.groupValues?.getOrNull(1)
                 ?.let { decodeHtml(it).replace(",", "").trim().toIntOrNull() }
                 ?: rawTds.getOrNull(1)?.let { decodeHtml(it).replace(",", "").trim().toIntOrNull() }
-                ?: 0
 
-            val leeches = leechRegex.find(row)?.groupValues?.getOrNull(1)
+            val knownLeeches = leechRegex.find(row)?.groupValues?.getOrNull(1)
                 ?.let { decodeHtml(it).replace(",", "").trim().toIntOrNull() }
                 ?: rawTds.getOrNull(2)?.let { decodeHtml(it).replace(",", "").trim().toIntOrNull() }
-                ?: 0
 
-            val dateLabel = dateRegex.find(row)?.groupValues?.getOrNull(1)
+            val dateRaw = dateRegex.find(row)?.groupValues?.getOrNull(1)
                 ?.let { decodeHtml(it).trim() }
-                ?.takeIf { it.isNotBlank() }
-                ?: rawTds.getOrNull(3)?.let { decodeHtml(it).trim() }?.takeIf { it.isNotBlank() }
-                ?: "Recent"
+                ?.takeIf { it.isNotBlank() && it != "-" && it != "—" }
+                ?: rawTds.getOrNull(3)?.let { decodeHtml(it).trim() }?.takeIf { it.isNotBlank() && it != "-" && it != "—" }
+            val dateLabel = dateRaw ?: "Unknown"
+            val knownEpoch = dateRaw?.let { estimateRelativeEpochOrNull(it) }
 
             val rawSizeHtml = sizeRegex.find(row)?.groupValues?.getOrNull(1)
                 ?: rawTds.getOrNull(4)
                 ?: ""
             val cleanedSize = decodeHtml(rawSizeHtml.replace(spanStripRegex, "")).trim()
-            val sizeLabel = sizeTokenRegex.find(cleanedSize)?.groupValues?.getOrNull(1)
-                ?: cleanedSize.ifBlank { "—" }
+            val matchedSizeToken = sizeTokenRegex.find(cleanedSize)?.groupValues?.getOrNull(1)
+            val knownSizeBytes = QualityAndHealthParser.parseSizeToKnownBytes(matchedSizeToken ?: cleanedSize)
+            val sizeLabel = matchedSizeToken
+                ?: cleanedSize.takeIf { it.isNotBlank() && it != "-" && it != "—" }
+                ?: "Unknown"
 
             val detailPath = Regex("(/torrent/\\d+/[^\"'?#\\s]+)").find(rawHref)?.groupValues?.getOrNull(1) ?: rawHref
             val fullDetailUrl = if (rawHref.startsWith("http", ignoreCase = true)) {
@@ -450,14 +590,20 @@ object IndexerParsers {
                 source = IndexerSource.X1337,
                 category = inferCategoryFromRowOrFallback(row, fallbackCategory),
                 sizeLabel = sizeLabel,
-                sizeBytes = QualityAndHealthParser.parseSizeToBytes(sizeLabel),
-                seeders = seeds,
-                leechers = leeches,
+                sizeBytes = knownSizeBytes ?: 0L,
+                seeders = knownSeeds?.coerceAtLeast(0) ?: 0,
+                leechers = knownLeeches?.coerceAtLeast(0) ?: 0,
                 uploadDateLabel = dateLabel,
-                uploadEpochSeconds = estimateRelativeEpoch(dateLabel),
+                uploadEpochSeconds = knownEpoch ?: 0L,
                 magnetUri = null, // Resolved lazily on tap with multi-mirror failover
                 infoHash = "",
-                detailPageUrl = fullDetailUrl
+                detailPageUrl = fullDetailUrl,
+                swarmHealth = QualityAndHealthParser.computeSwarmHealth(knownSeeds?.coerceAtLeast(0), knownLeeches?.coerceAtLeast(0)),
+                listingId = torrentId,
+                knownSizeBytes = knownSizeBytes,
+                knownSeeders = knownSeeds?.coerceAtLeast(0),
+                knownLeechers = knownLeeches?.coerceAtLeast(0),
+                knownUploadEpochSeconds = knownEpoch
             )
             if (results.size >= 45) break
         }
@@ -480,21 +626,23 @@ object IndexerParsers {
 
     fun extractMagnetFromDetailHtml(html: String, fallbackTitle: String = "torrent"): String? {
         if (isCloudflareOrBlockedHtml(html)) return null
-        val magnetRegex = Regex("(magnet:\\?xt=urn:btih:[a-zA-Z0-9]{32,40}[^\"'\\s<>]*)", RegexOption.IGNORE_CASE)
+        val magnetRegex = Regex("(magnet:\\?xt=urn:(?:btih|btmh):[^\"'\\s<>]+)", RegexOption.IGNORE_CASE)
         val raw = magnetRegex.find(html)?.groupValues?.getOrNull(1)
         if (!raw.isNullOrBlank()) {
-            return decodeHtml(raw)
+            val decoded = decodeHtml(raw)
+            if (MagnetParser.extractVerifiedIdentities(decoded).isNotEmpty()) {
+                return decoded
+            }
         }
         // Fallback: 1337x detail pages also expose raw 40-char SHA1 hash inside <div class="infohash-box">
         val infoHashBoxRegex = Regex(
-            "infohash-box[^>]*>.*?<span[^>]*>\\s*([a-fA-F0-9]{40})\\s*</span>",
+            "infohash-box[^>]*>.*?<span[^>]*>\\s*([a-fA-F0-9]{40}|[A-Za-z2-7]{32})\\s*</span>",
             setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
         )
         val hash = infoHashBoxRegex.find(html)?.groupValues?.getOrNull(1)
-        return if (!hash.isNullOrBlank()) {
-            QualityAndHealthParser.buildMagnetFromHash(hash, fallbackTitle)
-        } else {
-            null
+        val verified = MagnetParser.normalizeHash(hash, TorrentHashFamily.BTIH)
+        return verified?.let {
+            MagnetParser.buildMagnetFromHash(it.canonicalHex, fallbackTitle, it.family)
         }
     }
 
@@ -505,9 +653,14 @@ object IndexerParsers {
         strict1337xOnly: Boolean = true
     ): List<TorrentResult> {
         val trimmed = jsonBody.trim()
-        if (!trimmed.startsWith("{")) return emptyList()
-        val root = JSONObject(trimmed)
-        val arr = root.optJSONArray("hits") ?: root.optJSONArray("data") ?: return emptyList()
+        if (!trimmed.startsWith("{")) {
+            throw ParserException("Expected JSON object from Knaben")
+        }
+        val root = runCatching { JSONObject(trimmed) }.getOrElse {
+            throw ParserException("Malformed Knaben JSON", it)
+        }
+        val arr = root.optJSONArray("hits") ?: root.optJSONArray("data")
+            ?: throw ParserException("Knaben JSON missing hits/data array")
         val results = mutableListOf<TorrentResult>()
         val seenKeys = HashSet<String>()
 
@@ -525,30 +678,30 @@ object IndexerParsers {
             if (title.isBlank()) continue
 
             val rawMagnet = obj.optString("magnetUrl", obj.optString("magnet", "")).trim()
-            val hash = obj.optString("hash", "").trim().lowercase(Locale.US).ifBlank {
-                QualityAndHealthParser.extractHashFromMagnet(rawMagnet)
-            }
+            val verifiedFromMagnet = MagnetParser.extractVerifiedIdentities(rawMagnet).firstOrNull()
+            val verifiedFromField = MagnetParser.normalizeHash(obj.optString("hash", ""))
+            val verified = verifiedFromField ?: verifiedFromMagnet
             val finalMagnet = rawMagnet.ifBlank {
-                QualityAndHealthParser.buildMagnetFromHash(hash, title)
+                verified?.let { MagnetParser.buildMagnetFromHash(it.canonicalHex, title, it.family) }.orEmpty()
             }
             if (finalMagnet.isBlank()) continue
 
-            val dedupKey = hash.ifBlank { rawId.ifBlank { title.lowercase(Locale.US) } }
+            val dedupKey = verified?.storageKey ?: rawId.ifBlank { title.lowercase(Locale.US) }
             if (!seenKeys.add(dedupKey)) continue
 
-            val sizeBytes = obj.optLong("bytes", 0L).takeIf { it > 0L }
-                ?: obj.optString("bytes", "0").toLongOrNull()
-                ?: QualityAndHealthParser.parseSizeToBytes(obj.optString("size", ""))
-            val sizeLabel = obj.optString("size", "").ifBlank {
-                QualityAndHealthParser.formatBytes(sizeBytes)
+            val knownSizeBytes = parseOptionalLong(obj, "bytes")?.takeIf { it > 0L }
+                ?: QualityAndHealthParser.parseSizeToKnownBytes(obj.optString("size", ""))
+            val sizeLabel = obj.optString("size", "").trim().ifBlank {
+                QualityAndHealthParser.formatKnownBytes(knownSizeBytes)
             }
-            val seeders = obj.optString("seeders", "").toIntOrNull() ?: obj.optInt("seeders", 0)
-            val leechers = obj.optString("peers", "").toIntOrNull()
-                ?: obj.optInt("peers", obj.optInt("leechers", 0))
+            val knownSeeders = parseOptionalInt(obj, "seeders")
+            val knownLeechers = parseOptionalInt(obj, "peers", "leechers")
             val dateRaw = obj.optString("date", "")
-            val epoch = parseIsoDateEpoch(dateRaw)
+            val knownEpoch = parseIsoDateEpochOrNull(dateRaw)
             val cachedId = obj.optString("cachedId", "").trim()
-            val stableId = cachedId.ifBlank { hash.take(16).ifBlank { rawId.ifBlank { title.hashCode().toUInt().toString() } } }
+            val stableId = cachedId.ifBlank {
+                verified?.canonicalHex?.take(16) ?: rawId.ifBlank { title.hashCode().toUInt().toString() }
+            }
 
             results += TorrentResult(
                 id = "x1337_$stableId",
@@ -556,14 +709,22 @@ object IndexerParsers {
                 source = IndexerSource.X1337,
                 category = inferKnabenCategory(obj, fallbackCategory),
                 sizeLabel = sizeLabel,
-                sizeBytes = sizeBytes,
-                seeders = seeders,
-                leechers = leechers,
-                uploadDateLabel = formatEpoch(epoch),
-                uploadEpochSeconds = epoch,
+                sizeBytes = knownSizeBytes ?: 0L,
+                seeders = knownSeeders ?: 0,
+                leechers = knownLeechers ?: 0,
+                uploadDateLabel = formatEpoch(knownEpoch),
+                uploadEpochSeconds = knownEpoch ?: 0L,
                 magnetUri = finalMagnet,
-                infoHash = hash,
-                detailPageUrl = details
+                infoHash = verified?.canonicalHex.orEmpty(),
+                detailPageUrl = details,
+                swarmHealth = QualityAndHealthParser.computeSwarmHealth(knownSeeders, knownLeechers),
+                listingId = stableId,
+                knownSizeBytes = knownSizeBytes,
+                knownSeeders = knownSeeders,
+                knownLeechers = knownLeechers,
+                knownUploadEpochSeconds = knownEpoch,
+                canonicalHashHex = verified?.canonicalHex.orEmpty(),
+                canonicalHashFamily = verified?.family
             )
             if (results.size >= 50) break
         }
@@ -607,8 +768,8 @@ object IndexerParsers {
         return TorrentCategory.OTHER
     }
 
-    private fun parseIsoDateEpoch(rawDate: String): Long {
-        if (rawDate.isBlank()) return 0L
+    private fun parseIsoDateEpochOrNull(rawDate: String): Long? {
+        if (rawDate.isBlank()) return null
         val cleaned = rawDate.trim()
             .replace("Z", "+0000")
             .replace(Regex("([+-]\\d\\d):(\\d\\d)$"), "$1$2")
@@ -627,93 +788,121 @@ object IndexerParsers {
                 if (parsed != null) return parsed.time / 1000L
             }
         }
-        return 0L
+        return null
     }
 
     // --- 6. LIMETORRENTS (RSS XML) ---
     fun parseLimeTorrentsRss(xmlBody: String, fallbackCategory: TorrentCategory): List<TorrentResult> {
+        val trimmed = xmlBody.trim()
+        if (!trimmed.startsWith("<")) {
+            throw ParserException("Expected XML feed from LimeTorrents")
+        }
         val results = mutableListOf<TorrentResult>()
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-        parser.setInput(StringReader(xmlBody))
+        parser.setInput(StringReader(trimmed))
 
+        var sawRssOrFeedRoot = false
         var inItem = false
         var title = ""
         var link = ""
         var pubDate = ""
         var description = ""
-        var sizeBytes = 0L
+        var knownSizeBytes: Long? = null
         var enclosureUrl = ""
 
-        var eventType = parser.eventType
-        while (eventType != XmlPullParser.END_DOCUMENT) {
-            when (eventType) {
-                XmlPullParser.START_TAG -> {
-                    val tag = parser.name.lowercase(Locale.US)
-                    if (tag == "item") {
-                        inItem = true
-                        title = ""
-                        link = ""
-                        pubDate = ""
-                        description = ""
-                        sizeBytes = 0L
-                        enclosureUrl = ""
-                    } else if (inItem) {
-                        if (tag == "enclosure") {
-                            enclosureUrl = parser.getAttributeValue(null, "url") ?: ""
-                            sizeBytes = parser.getAttributeValue(null, "length")?.toLongOrNull() ?: sizeBytes
-                        } else {
-                            val text = runCatching { parser.nextText().trim() }.getOrDefault("")
-                            when (tag) {
-                                "title" -> title = text
-                                "link" -> link = text
-                                "pubdate" -> pubDate = text
-                                "description" -> description = text
-                                "size" -> sizeBytes = text.toLongOrNull() ?: sizeBytes
+        try {
+            var eventType = parser.eventType
+            while (eventType != XmlPullParser.END_DOCUMENT) {
+                when (eventType) {
+                    XmlPullParser.START_TAG -> {
+                        val tag = parser.name.lowercase(Locale.US)
+                        if (tag == "rss" || tag == "channel" || tag == "feed") {
+                            sawRssOrFeedRoot = true
+                        }
+                        if (tag == "item") {
+                            inItem = true
+                            title = ""
+                            link = ""
+                            pubDate = ""
+                            description = ""
+                            knownSizeBytes = null
+                            enclosureUrl = ""
+                        } else if (inItem) {
+                            if (tag == "enclosure") {
+                                enclosureUrl = parser.getAttributeValue(null, "url") ?: ""
+                                parser.getAttributeValue(null, "length")?.toLongOrNull()?.takeIf { it > 0L }?.let {
+                                    knownSizeBytes = it
+                                }
+                            } else {
+                                when (tag) {
+                                    "title" -> title = parser.nextText().trim()
+                                    "link" -> link = parser.nextText().trim()
+                                    "pubdate" -> pubDate = parser.nextText().trim()
+                                    "description" -> description = parser.nextText().trim()
+                                    "size" -> parser.nextText().trim().toLongOrNull()?.takeIf { it >= 0L }?.let { knownSizeBytes = it }
+                                }
+                            }
+                        }
+                    }
+                    XmlPullParser.END_TAG -> {
+                        if (parser.name.equals("item", ignoreCase = true) && inItem) {
+                            inItem = false
+                            if (title.isNotBlank()) {
+                                val knownSeeds = Regex("Seeds:\\s*(\\d+)", RegexOption.IGNORE_CASE)
+                                    .find(description)?.groupValues?.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(0)
+                                val knownLeeches = Regex("Leechers:\\s*(\\d+)", RegexOption.IGNORE_CASE)
+                                    .find(description)?.groupValues?.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(0)
+                                val rawHash = Regex("/([A-Fa-f0-9]{40})\\.torrent").find(enclosureUrl)?.groupValues?.getOrNull(1)
+                                    .orEmpty()
+                                val verified = MagnetParser.normalizeHash(rawHash, TorrentHashFamily.BTIH)
+                                val displayTitle = decodeHtml(title)
+                                val magnet = verified?.let {
+                                    MagnetParser.buildMagnetFromHash(it.canonicalHex, displayTitle, it.family)
+                                }
+                                val knownEpoch = parseRssDateEpochOrNull(pubDate)
+                                val listingId = verified?.canonicalHex?.take(16) ?: link.hashCode().toUInt().toString()
+
+                                results += TorrentResult(
+                                    id = "lime_$listingId",
+                                    title = displayTitle,
+                                    source = IndexerSource.LIMETORRENTS,
+                                    category = fallbackCategory,
+                                    sizeLabel = QualityAndHealthParser.formatKnownBytes(knownSizeBytes),
+                                    sizeBytes = knownSizeBytes ?: 0L,
+                                    seeders = knownSeeds ?: 0,
+                                    leechers = knownLeeches ?: 0,
+                                    uploadDateLabel = formatEpoch(knownEpoch),
+                                    uploadEpochSeconds = knownEpoch ?: 0L,
+                                    magnetUri = magnet,
+                                    infoHash = verified?.canonicalHex.orEmpty(),
+                                    detailPageUrl = link,
+                                    swarmHealth = QualityAndHealthParser.computeSwarmHealth(knownSeeds, knownLeeches),
+                                    listingId = listingId,
+                                    knownSizeBytes = knownSizeBytes,
+                                    knownSeeders = knownSeeds,
+                                    knownLeechers = knownLeeches,
+                                    knownUploadEpochSeconds = knownEpoch,
+                                    canonicalHashHex = verified?.canonicalHex.orEmpty(),
+                                    canonicalHashFamily = verified?.family
+                                )
                             }
                         }
                     }
                 }
-                XmlPullParser.END_TAG -> {
-                    if (parser.name.equals("item", ignoreCase = true) && inItem) {
-                        inItem = false
-                        if (title.isNotBlank()) {
-                            val seeds = Regex("Seeds:\\s*(\\d+)", RegexOption.IGNORE_CASE)
-                                .find(description)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
-                            val leeches = Regex("Leechers:\\s*(\\d+)", RegexOption.IGNORE_CASE)
-                                .find(description)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
-                            val hash = Regex("/([A-Fa-f0-9]{40})\\.torrent").find(enclosureUrl)?.groupValues?.getOrNull(1)
-                                ?.lowercase(Locale.US) ?: ""
-                            val magnet = if (hash.isNotBlank()) {
-                                QualityAndHealthParser.buildMagnetFromHash(hash, title)
-                            } else null
-                            val epoch = parseRssDateEpoch(pubDate)
-                            results += TorrentResult(
-                                id = "lime_${hash.ifBlank { link.hashCode().toUInt().toString() }}",
-                                title = decodeHtml(title),
-                                source = IndexerSource.LIMETORRENTS,
-                                category = fallbackCategory,
-                                sizeLabel = QualityAndHealthParser.formatBytes(sizeBytes),
-                                sizeBytes = sizeBytes,
-                                seeders = seeds,
-                                leechers = leeches,
-                                uploadDateLabel = formatEpoch(epoch),
-                                uploadEpochSeconds = epoch,
-                                magnetUri = magnet,
-                                infoHash = hash,
-                                detailPageUrl = link
-                            )
-                        }
-                    }
-                }
+                eventType = parser.next()
             }
-            eventType = parser.next()
+        } catch (e: Exception) {
+            throw ParserException("Malformed LimeTorrents RSS XML", e)
+        }
+        if (!sawRssOrFeedRoot || inItem) {
+            throw ParserException("Unexpected or truncated RSS XML response from LimeTorrents")
         }
         return results
     }
 
-    private fun parseRssDateEpoch(rawDate: String): Long {
-        if (rawDate.isBlank()) return 0L
+    private fun parseRssDateEpochOrNull(rawDate: String): Long? {
+        if (rawDate.isBlank()) return null
         val formats = listOf(
             "EEE, dd MMM yyyy HH:mm:ss Z",
             "EEE, dd MMM yyyy HH:mm:ss zzz",
@@ -727,21 +916,46 @@ object IndexerParsers {
                 if (parsed != null) return parsed.time / 1000L
             }
         }
-        return 0L
+        return null
     }
 
-    private fun estimateRelativeEpoch(label: String): Long {
+    private fun estimateRelativeEpochOrNull(label: String): Long? {
+        val cleaned = label.trim()
+        if (cleaned.isBlank() || cleaned == "—" || cleaned == "-" || cleaned.equals("unknown", true)) {
+            return null
+        }
         val now = System.currentTimeMillis() / 1000L
-        val lower = label.lowercase(Locale.US)
-        val num = Regex("(\\d+)").find(lower)?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 1L
+        val lower = cleaned.lowercase(Locale.US)
+        val num = Regex("(\\d+)").find(lower)?.groupValues?.getOrNull(1)?.toLongOrNull()
         return when {
-            lower.contains("min") || lower.contains("am") || lower.contains("pm") || lower.contains("today") -> now - num * 60L
-            lower.contains("hour") || lower.contains("hr") || lower.endsWith("h") -> now - num * 3600L
-            lower.contains("day") || lower.contains("d ") || lower.endsWith("d") -> now - num * 86400L
-            lower.contains("week") || lower.endsWith("w") -> now - num * 7L * 86400L
-            lower.contains("month") || lower.contains("mo") -> now - num * 30L * 86400L
-            lower.contains("year") || lower.contains("yr") || lower.endsWith("y") -> now - num * 365L * 86400L
-            else -> now - 86400L * 3L
+            lower.contains("min") || lower.contains("am") || lower.contains("pm") || lower.contains("today") ->
+                now - (num ?: 1L) * 60L
+            lower.contains("hour") || lower.contains("hr") || lower.endsWith("h") ->
+                now - (num ?: 1L) * 3600L
+            lower.contains("day") || lower.contains("d ") || lower.endsWith("d") ->
+                now - (num ?: 1L) * 86400L
+            lower.contains("week") || lower.endsWith("w") ->
+                now - (num ?: 1L) * 7L * 86400L
+            lower.contains("month") || lower.contains("mo") ->
+                now - (num ?: 1L) * 30L * 86400L
+            lower.contains("year") || lower.contains("yr") || lower.endsWith("y") ->
+                now - (num ?: 1L) * 365L * 86400L
+            Regex("[a-zA-Z]{3}\\.?\\s+\\d{1,2}").containsMatchIn(lower) -> {
+                // Absolute date string like "Nov. 15th '26"
+                val sanitized = lower.replace(Regex("(st|nd|rd|th)"), "")
+                    .replace("'", " 20")
+                    .replace(".", "")
+                    .trim()
+                val parsed = listOf("MMM d yy", "MMM d 20yy", "MMM dd 20yy").firstNotNullOfOrNull { pat ->
+                    runCatching {
+                        SimpleDateFormat(pat, Locale.US).apply {
+                            timeZone = TimeZone.getTimeZone("UTC")
+                        }.parse(sanitized)?.time?.div(1000L)
+                    }.getOrNull()
+                }
+                parsed ?: (now - 86400L * 3L)
+            }
+            else -> null
         }
     }
 }

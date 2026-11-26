@@ -3,9 +3,13 @@ package com.example.util
 import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import com.example.domain.magnet.MagnetParseResult
+import com.example.domain.magnet.MagnetParser
 import java.util.Locale
 
 object IntentActions {
@@ -18,11 +22,12 @@ object IntentActions {
     }
 
     /**
-     * Opens a magnet URI in an installed local Android torrent client (e.g. Flud, LibreTorrent).
-     * Returns true if a client accepted the intent, false if none was found.
+     * Validates magnet semantics via [MagnetParser] and opens a local torrent client
+     * (e.g. Flud, LibreTorrent). Never auto-launches or accepts malformed magnets.
      */
     fun openMagnetInLocalApp(context: Context, magnetUri: String): Boolean {
-        val uri = runCatching { Uri.parse(magnetUri) }.getOrNull() ?: return false
+        val valid = MagnetParser.parseMagnetInput(magnetUri) as? MagnetParseResult.Valid ?: return false
+        val uri = runCatching { Uri.parse(valid.magnetUri) }.getOrNull() ?: return false
         if (!uri.scheme.equals("magnet", ignoreCase = true)) return false
         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -39,6 +44,7 @@ object IntentActions {
         val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
         val scheme = uri.scheme?.lowercase(Locale.US)
         if (scheme != "http" && scheme != "https") return false
+        if (!uri.userInfo.isNullOrEmpty()) return false
         val intent = Intent(Intent.ACTION_VIEW, uri).apply {
             addCategory(Intent.CATEGORY_BROWSABLE)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -53,7 +59,7 @@ object IntentActions {
 
     /**
      * Opens Android's native bottom intent chooser so the user can pick an external download manager
-     * (e.g., 1DM, IDM+, ADM, FDM) or another installed browser to handle a Seedr/TorBox download URL.
+     * (e.g., 1DM, IDM+, ADM, FDM) or another installed browser to handle a direct download URL.
      */
     fun openDownloadManagerChooser(
         context: Context,
@@ -64,9 +70,9 @@ object IntentActions {
         val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return false
         val scheme = uri.scheme?.lowercase(Locale.US)
         if (scheme != "http" && scheme != "https") return false
+        if (!uri.userInfo.isNullOrEmpty()) return false
 
-        val cleanTitle = fileName?.trim()?.take(80)
-        // Primary browsable intent surfaces installed browsers & download managers that accept http(s) URLs.
+        val cleanTitle = fileName?.replace(Regex("[\\r\\n\\t]+"), " ")?.trim()?.take(80)
         val primaryIntent = Intent(Intent.ACTION_VIEW, uri).apply {
             addCategory(Intent.CATEGORY_BROWSABLE)
             if (!cleanTitle.isNullOrBlank()) {
@@ -84,8 +90,6 @@ object IntentActions {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
 
-        // Alternate typed intent ensures download managers & media apps matching by file MIME type
-        // (such as IDM/1DM/ADM/VLC) appear in the same system bottom chooser.
         val safeMime = mimeType
             ?.substringBefore(';')
             ?.trim()
@@ -113,6 +117,10 @@ object IntentActions {
         }
     }
 
+    /**
+     * Outbound text sharing via system chooser. Explicitly excludes MagnetVault's own
+     * ACTION_SEND intake activity so outbound sharing stays distinct from incoming capture.
+     */
     fun shareText(context: Context, title: String, content: String, chooserLabel: String = "Share Magnet Link") {
         val sendIntent = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
@@ -121,6 +129,12 @@ object IntentActions {
         }
         val chooser = Intent.createChooser(sendIntent, chooserLabel).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                putExtra(
+                    Intent.EXTRA_EXCLUDE_COMPONENTS,
+                    arrayOf(ComponentName(context.packageName, "com.example.MainActivity"))
+                )
+            }
         }
         context.startActivity(chooser)
     }

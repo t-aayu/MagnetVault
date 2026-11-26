@@ -8,12 +8,17 @@
     <string name="sign_in_google">Sign in with Google</string>
     <string name="continue_without_sign_in">Continue without Sign-In</string>
     <string name="sign_out">Sign out</string>
-    <string name="search_placeholder">Search 1337x, EZTV, YTS, TPB, Nyaa…</string>
+    <string name="search_placeholder">Search releases or paste a magnet…</string>
     <string name="trending_title">Trending Across Indexers</string>
+    <string name="trending_show_action">Explore Trending</string>
+    <string name="trending_hide_action">Hide Trending</string>
     <string name="recent_searches">Recent Searches</string>
-    <string name="action_copy_magnet">Copy Magnet</string>
-    <string name="action_open_seedr">Open Seedr.cc</string>
-    <string name="action_open_torbox">Open TorBox</string>
+    <string name="action_paste_magnet">Paste magnet</string>
+    <string name="action_open_with">Open with…</string>
+    <string name="action_copy_magnet">Copy magnet</string>
+    <string name="action_save">Save</string>
+    <string name="action_open_seedr">Seedr.cc</string>
+    <string name="action_open_torbox">TorBox</string>
     <string name="action_open_local">Local Client</string>
     <string name="action_open_website">Open Website</string>
     <string name="action_choose_download_manager">Choose Download Manager</string>
@@ -21,6 +26,10 @@
     <string name="action_share">Share</string>
     <string name="action_bookmark">Bookmark</string>
     <string name="action_bookmarked">Saved</string>
+    <string name="action_filters">Filters</string>
+    <string name="action_reset">Reset</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_sources">Sources</string>
     <string name="action_test_mirrors">Ping All Mirrors</string>
     <string name="action_add_mirror">Add Mirror URL</string>
     <string name="action_reset_defaults">Reset Defaults</string>
@@ -28,4 +37,13 @@
     <string name="empty_bookmarks_subtitle">Bookmark any torrent from search results to keep it handy here.</string>
     <string name="empty_history_title">No Search History</string>
     <string name="empty_history_subtitle">Your recent searches will appear here automatically.</string>
+    <string name="vault_tab_saved">Saved</string>
+    <string name="vault_tab_history">History</string>
+    <string name="vault_export_json">Export JSON</string>
+    <string name="vault_collections">Collections</string>
+    <string name="collections_local_only">Local-only (not synced)</string>
+    <string name="pause_history_recording">Pause Search History</string>
+    <string name="clear_history_confirm_title">Clear all search history?</string>
+    <string name="clear_history_confirm_body">This removes saved search queries from this device and from cloud sync if history sync is enabled.</string>
+    <string name="sync_review_enable">Review &amp; Enable Sync</string>
 </resources>

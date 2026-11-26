@@ -3,6 +3,10 @@ package com.example.data.network
 import android.net.Uri
 import com.example.model.CustomDnsConfig
 import com.example.model.CustomDnsPreset
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import okhttp3.Dns
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -14,6 +18,23 @@ import java.net.UnknownHostException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+
+enum class DnsRuntimeStatus(val label: String) {
+    WORKING("Working"),
+    BLOCKED("Blocked"),
+    FALLBACK("System Fallback"),
+    INVALID_CONFIG("Invalid Config"),
+    SYSTEM_DEFAULT("System Default")
+}
+
+data class DnsDiagnosticsSnapshot(
+    val status: DnsRuntimeStatus = DnsRuntimeStatus.WORKING,
+    val activePreset: CustomDnsPreset = CustomDnsPreset.ADGUARD,
+    val blockedCount: Int = 0,
+    val fallbackCount: Int = 0,
+    val lastFallbackReason: String? = null,
+    val updatedAtEpochMs: Long? = null
+)
 
 data class DnsPacketParseResult(
     val rcode: Int,
@@ -29,15 +50,16 @@ data class CustomDnsTestResult(
     val reachable: Boolean,
     val latencyMs: Long,
     val adBlockingVerified: Boolean,
+    val status: DnsRuntimeStatus,
     val message: String
 )
 
 /**
- * App-wide DNS-over-HTTPS (RFC 8484) resolver and ad-blocking host filter.
- * - Wired into [HttpClientFactory] so all indexer searches and mirror checks resolve via Custom DoH.
- * - Queried by [com.example.ui.browser.InAppBrowserScreen] inside WebView.shouldInterceptRequest
- *   so ad/tracker/pop-under domains blocked by the user's Custom DNS (0.0.0.0 / :: / NXDOMAIN)
- *   are dropped before loading on sites opened inside the app.
+ * App-wide DNS-over-HTTPS (RFC 8484) resolver and DNS-based host filter.
+ * - Wired into [HttpClientFactory] so all indexer searches and mirror checks resolve via Custom DoH,
+ *   falling back to System DNS if the configured DoH endpoint is unreachable.
+ * - Queried by [com.example.ui.browser] inside WebView.shouldInterceptRequest for DNS-based request
+ *   filtering so blocked ad/tracker domains are dropped before loading.
  */
 object CustomAppDns : Dns {
     private val DOH_MEDIA_TYPE = "application/dns-message".toMediaType()
@@ -74,12 +96,31 @@ object CustomAppDns : Dns {
     @Volatile
     private var activeDohHost: String = extractHostLower(CustomDnsPreset.ADGUARD.dohUrl)
 
+    @Volatile
+    internal var wireQueryOverride: ((hostname: String, dohUrl: String) -> DnsPacketParseResult?)? = null
+
+    @Volatile
+    internal var systemDnsOverride: Dns = Dns.SYSTEM
+
     private val cache = ConcurrentHashMap<String, CachedEntry>()
     private val inFlightLocks = ConcurrentHashMap<String, Any>()
 
+    private val _diagnostics = MutableStateFlow(DnsDiagnosticsSnapshot())
+    val diagnostics: StateFlow<DnsDiagnosticsSnapshot> = _diagnostics.asStateFlow()
+
     fun currentConfig(): CustomDnsConfig = activeConfig
 
+    internal fun resetForTesting() {
+        wireQueryOverride = null
+        systemDnsOverride = Dns.SYSTEM
+        cache.clear()
+        configure(CustomDnsConfig(preset = CustomDnsPreset.ADGUARD))
+        _diagnostics.value = DnsDiagnosticsSnapshot()
+    }
+
     fun configure(config: CustomDnsConfig) {
+        val isInvalidCustom = config.preset == CustomDnsPreset.CUSTOM &&
+            validateAndNormalizeDohEndpoint(config.customEndpoint) == null
         val sanitizedCustom = if (config.preset == CustomDnsPreset.CUSTOM) {
             validateAndNormalizeDohEndpoint(config.customEndpoint).orEmpty()
         } else {
@@ -92,6 +133,24 @@ object CustomAppDns : Dns {
         if (changed) {
             cache.clear()
         }
+        val initialStatus = when {
+            isInvalidCustom -> DnsRuntimeStatus.INVALID_CONFIG
+            normalized.preset == CustomDnsPreset.SYSTEM -> DnsRuntimeStatus.SYSTEM_DEFAULT
+            !normalized.isEnabled -> DnsRuntimeStatus.INVALID_CONFIG
+            else -> DnsRuntimeStatus.WORKING
+        }
+        _diagnostics.value = DnsDiagnosticsSnapshot(
+            status = initialStatus,
+            activePreset = normalized.preset,
+            blockedCount = if (changed) 0 else _diagnostics.value.blockedCount,
+            fallbackCount = if (changed) 0 else _diagnostics.value.fallbackCount,
+            lastFallbackReason = if (initialStatus == DnsRuntimeStatus.INVALID_CONFIG) {
+                "Custom DoH endpoint is empty or not a valid public https:// resolver"
+            } else {
+                null
+            },
+            updatedAtEpochMs = System.currentTimeMillis()
+        )
     }
 
     /**
@@ -148,21 +207,28 @@ object CustomAppDns : Dns {
     override fun lookup(hostname: String): List<InetAddress> {
         val cleanHost = hostname.trim().lowercase(Locale.US).trimEnd('.')
         val cfg = activeConfig
+        if (cfg.preset == CustomDnsPreset.CUSTOM && cfg.activeDohUrl.isBlank()) {
+            recordFallback(cfg.preset, "Invalid DoH configuration; using System DNS")
+            return systemDnsOverride.lookup(hostname)
+        }
         if (!cfg.isEnabled || cleanHost.isBlank() || cleanHost == activeDohHost || isIpLiteral(cleanHost)) {
-            return Dns.SYSTEM.lookup(hostname)
+            return systemDnsOverride.lookup(hostname)
         }
 
         val entry = resolveWithCache(cleanHost, cfg.activeDohUrl)
         if (entry != null) {
             if (entry.isBlocked) {
-                throw UnknownHostException("Blocked by Custom DNS (${cfg.preset.displayName}): $cleanHost")
+                recordBlockedHost(cfg.preset)
+                throw UnknownHostException("Blocked by Custom DNS (${cfg.preset.displayName})")
             }
             if (entry.addresses.isNotEmpty()) {
+                recordWorking(cfg.preset)
                 return entry.addresses
             }
         }
         // Fail open to system DNS on transient DoH connectivity issues so app search remains usable.
-        return Dns.SYSTEM.lookup(hostname)
+        recordFallback(cfg.preset, "DoH resolver unavailable — fell back to System DNS")
+        return systemDnsOverride.lookup(hostname)
     }
 
     /**
@@ -175,10 +241,54 @@ object CustomAppDns : Dns {
         val cleanHost = rawHost.trim().lowercase(Locale.US).trimEnd('.')
         if (cleanHost.isBlank() || cleanHost == activeDohHost || isIpLiteral(cleanHost)) return false
         if (cleanHost in CLOUDFLARE_ESSENTIAL_HOSTS) return false
-        // Avoid blocking main-frame navigation unless the DoH server explicitly sinkholes/blocks the host.
-        val entry = resolveWithCache(cleanHost, cfg.activeDohUrl) ?: return false
+        val entry = resolveWithCache(cleanHost, cfg.activeDohUrl)
+        if (entry == null) {
+            recordFallback(cfg.preset, "DoH filter unavailable — allowing WebView fallback")
+            return false
+        }
         if (isMainFrame && !entry.isBlocked) return false
+        if (entry.isBlocked) {
+            recordBlockedHost(cfg.preset)
+        }
         return entry.isBlocked
+    }
+
+    private fun recordWorking(preset: CustomDnsPreset) {
+        val now = System.currentTimeMillis()
+        _diagnostics.update { cur ->
+            cur.copy(
+                status = DnsRuntimeStatus.WORKING,
+                activePreset = preset,
+                lastFallbackReason = null,
+                updatedAtEpochMs = now
+            )
+        }
+    }
+
+    private fun recordBlockedHost(preset: CustomDnsPreset) {
+        val now = System.currentTimeMillis()
+        _diagnostics.update { cur ->
+            cur.copy(
+                status = DnsRuntimeStatus.BLOCKED,
+                activePreset = preset,
+                blockedCount = cur.blockedCount + 1,
+                updatedAtEpochMs = now
+            )
+        }
+    }
+
+    private fun recordFallback(preset: CustomDnsPreset, reason: String) {
+        val now = System.currentTimeMillis()
+        val isInvalid = preset == CustomDnsPreset.CUSTOM && activeConfig.activeDohUrl.isBlank()
+        _diagnostics.update { cur ->
+            cur.copy(
+                status = if (isInvalid) DnsRuntimeStatus.INVALID_CONFIG else DnsRuntimeStatus.FALLBACK,
+                activePreset = preset,
+                fallbackCount = cur.fallbackCount + 1,
+                lastFallbackReason = reason,
+                updatedAtEpochMs = now
+            )
+        }
     }
 
     /**
@@ -192,7 +302,8 @@ object CustomAppDns : Dns {
                 reachable = true,
                 latencyMs = 0L,
                 adBlockingVerified = false,
-                message = "Using device default DNS (no custom ad-blocking DNS)"
+                status = DnsRuntimeStatus.SYSTEM_DEFAULT,
+                message = "Using System Default DNS (no DoH or DNS ad filtering)"
             )
         }
         val endpoint = if (config.preset == CustomDnsPreset.CUSTOM) {
@@ -201,40 +312,84 @@ object CustomAppDns : Dns {
             config.preset.dohUrl
         }
         if (endpoint.isNullOrBlank()) {
+            _diagnostics.update {
+                it.copy(
+                    status = DnsRuntimeStatus.INVALID_CONFIG,
+                    activePreset = config.preset,
+                    lastFallbackReason = "Invalid HTTPS DoH URL or hostname",
+                    updatedAtEpochMs = System.currentTimeMillis()
+                )
+            }
             return CustomDnsTestResult(
                 endpoint = config.customEndpoint,
                 reachable = false,
                 latencyMs = 0L,
                 adBlockingVerified = false,
-                message = "Invalid HTTPS DoH URL or hostname"
+                status = DnsRuntimeStatus.INVALID_CONFIG,
+                message = "Invalid Config: enter a valid public https:// DoH URL or hostname"
             )
         }
 
         val start = System.currentTimeMillis()
         val benign = queryDohWire("example.com", endpoint)
         val latency = (System.currentTimeMillis() - start).coerceAtLeast(1L)
-        if (benign == null || benign.addresses.isEmpty()) {
+        if (benign == null) {
+            _diagnostics.update {
+                it.copy(
+                    status = DnsRuntimeStatus.FALLBACK,
+                    activePreset = config.preset,
+                    lastFallbackReason = "DoH probe failed — search falls back to System DNS",
+                    updatedAtEpochMs = System.currentTimeMillis()
+                )
+            }
             return CustomDnsTestResult(
                 endpoint = endpoint,
                 reachable = false,
                 latencyMs = latency,
                 adBlockingVerified = false,
-                message = "Could not resolve via DoH endpoint"
+                status = DnsRuntimeStatus.FALLBACK,
+                message = "DoH unreachable • app search falls back to System DNS"
+            )
+        }
+        if (benign.isBlocked || benign.addresses.isEmpty()) {
+            _diagnostics.update {
+                it.copy(
+                    status = DnsRuntimeStatus.BLOCKED,
+                    activePreset = config.preset,
+                    updatedAtEpochMs = System.currentTimeMillis()
+                )
+            }
+            return CustomDnsTestResult(
+                endpoint = endpoint,
+                reachable = false,
+                latencyMs = latency,
+                adBlockingVerified = false,
+                status = DnsRuntimeStatus.BLOCKED,
+                message = "Resolver blocked test domain (${latency}ms)"
             )
         }
 
         val adCheck = queryDohWire("doubleclick.net", endpoint)
         val blocksAds = adCheck?.isBlocked == true
         val summary = if (blocksAds) {
-            "Connected (${latency}ms) • Ad-blocking active"
+            "Working (${latency}ms) • Test ad host blocked"
         } else {
-            "Connected (${latency}ms) • Encrypted DNS (no ad filter)"
+            "Working (${latency}ms) • Encrypted DoH active (no ad filter)"
+        }
+        _diagnostics.update {
+            it.copy(
+                status = DnsRuntimeStatus.WORKING,
+                activePreset = config.preset,
+                lastFallbackReason = null,
+                updatedAtEpochMs = System.currentTimeMillis()
+            )
         }
         return CustomDnsTestResult(
             endpoint = endpoint,
             reachable = true,
             latencyMs = latency,
             adBlockingVerified = blocksAds,
+            status = DnsRuntimeStatus.WORKING,
             message = summary
         )
     }
@@ -272,6 +427,9 @@ object CustomAppDns : Dns {
     }
 
     private fun queryDohWire(hostname: String, dohUrl: String): DnsPacketParseResult? {
+        wireQueryOverride?.let { override ->
+            return override(hostname, dohUrl)
+        }
         val queryBytes = buildDnsQueryPacket(hostname, qtype = 1) ?: return null
         val request = Request.Builder()
             .url(dohUrl)
